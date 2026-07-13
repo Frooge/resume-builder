@@ -15,15 +15,16 @@ import type {
 } from '../../types/resume'
 import { SECTION_LABELS } from '../../types/resume'
 import { formatDateRange, formatYearRange } from '../../lib/formatDate'
+import { sortEducation, sortExperience } from '../../lib/sortEntries'
 import {
-  PAGE_CONTENT_HEIGHT_PX,
   PAGE_GAP_PX,
   PAGE_HEIGHT_PX,
-  PAGE_PADDING_X_PX,
-  PAGE_PADDING_Y_PX,
+  PAGE_PACK_BUFFER_PX,
   PAGE_WIDTH_PX,
+  pageContentHeight,
+  pageContentWidth,
 } from '../../lib/pageSize'
-import { typographyCssVars } from '../../lib/typography'
+import { typographyCssVars, normalizeResumeStyle } from '../../lib/typography'
 import { SectionChrome } from './SectionChrome'
 
 interface ResumeDocumentProps {
@@ -34,11 +35,15 @@ interface ResumeDocumentProps {
 
 const SECTION_GAP_PX = 18
 const ENTRY_GAP_PX = 14
+const BULLET_GAP_PX = 2
+const SKILL_GAP_PX = 2
 
 type FlowUnit =
   | { key: string; sectionId: SectionId; kind: 'contact' }
   | { key: string; sectionId: SectionId; kind: 'summary' }
-  | { key: string; sectionId: SectionId; kind: 'skills' }
+  | { key: string; sectionId: 'skills'; kind: 'skills-heading' }
+  | { key: string; sectionId: 'skills'; kind: 'skills-line'; line: string }
+  | { key: string; sectionId: 'skills'; kind: 'skills-empty' }
   | {
       key: string
       sectionId: 'experience'
@@ -48,8 +53,15 @@ type FlowUnit =
   | {
       key: string
       sectionId: 'experience'
-      kind: 'experience-entry'
+      kind: 'experience-header'
       entry: ExperienceEntry
+    }
+  | {
+      key: string
+      sectionId: 'experience'
+      kind: 'experience-bullet'
+      entryId: string
+      bullet: string
     }
   | { key: string; sectionId: 'experience'; kind: 'experience-empty' }
   | {
@@ -200,7 +212,7 @@ function SectionHeading({
 }) {
   return (
     <h2
-      className="mb-2 border-b border-zinc-800 pb-[3px] font-bold uppercase tracking-[0.06em] text-zinc-800"
+      className="border-b border-zinc-800 pb-[3px] font-bold uppercase tracking-[0.06em] text-zinc-800"
       style={{ fontSize: 'var(--fs-section-heading)' }}
     >
       {children}
@@ -211,7 +223,7 @@ function SectionHeading({
 
 function SummaryBlock({ resume }: { resume: ResumeData }) {
   return (
-    <section>
+    <section className="flex flex-col gap-2">
       <SectionHeading>{SECTION_LABELS.summary}</SectionHeading>
       {resume.summary.trim() ? (
         <p
@@ -232,36 +244,18 @@ function SummaryBlock({ resume }: { resume: ResumeData }) {
   )
 }
 
-function SkillsBlock({ resume }: { resume: ResumeData }) {
-  const skills = resume.skills.map((s) => s.trim()).filter(Boolean)
+function SkillsLine({ line }: { line: string }) {
   return (
-    <section>
-      <SectionHeading>{SECTION_LABELS.skills}</SectionHeading>
-      {skills.length === 0 ? (
-        <p
-          className="italic text-zinc-400"
-          style={{ fontSize: 'var(--fs-muted)' }}
-        >
-          No skills yet.
-        </p>
-      ) : (
-        <div className="space-y-0.5">
-          {skills.map((line) => (
-            <p
-              key={line}
-              className="font-normal leading-[1.45] text-zinc-700"
-              style={{ fontSize: 'var(--fs-body)' }}
-            >
-              {line}
-            </p>
-          ))}
-        </div>
-      )}
-    </section>
+    <p
+      className="font-normal leading-[1.45] text-zinc-700"
+      style={{ fontSize: 'var(--fs-body)' }}
+    >
+      {line}
+    </p>
   )
 }
 
-function ExperienceEntryBlock({ entry }: { entry: ExperienceEntry }) {
+function ExperienceHeaderBlock({ entry }: { entry: ExperienceEntry }) {
   const dates = formatDateRange(entry.startDate, entry.endDate, entry.current)
 
   return (
@@ -298,21 +292,20 @@ function ExperienceEntryBlock({ entry }: { entry: ExperienceEntry }) {
           {entry.location}
         </p>
       ) : null}
-      <ul className="mt-1 list-disc space-y-[2px] pl-[18px]">
-        {entry.bullets
-          .map((b) => b.trim())
-          .filter(Boolean)
-          .map((bullet, i) => (
-            <li
-              key={i}
-              className="font-normal leading-[1.4] text-zinc-700"
-              style={{ fontSize: 'var(--fs-body)' }}
-            >
-              {bullet}
-            </li>
-          ))}
-      </ul>
     </div>
+  )
+}
+
+function ExperienceBullet({ bullet }: { bullet: string }) {
+  return (
+    <ul className="list-disc pl-[18px]">
+      <li
+        className="font-normal leading-[1.4] text-zinc-700"
+        style={{ fontSize: 'var(--fs-body)' }}
+      >
+        {bullet}
+      </li>
+    </ul>
   )
 }
 
@@ -362,7 +355,28 @@ function buildFlowUnits(resume: ResumeData): FlowUnit[] {
       continue
     }
     if (id === 'skills') {
-      units.push({ key: 'skills', sectionId: 'skills', kind: 'skills' })
+      units.push({
+        key: 'skills-heading',
+        sectionId: 'skills',
+        kind: 'skills-heading',
+      })
+      const lines = resume.skills.map((s) => s.trim()).filter(Boolean)
+      if (lines.length === 0) {
+        units.push({
+          key: 'skills-empty',
+          sectionId: 'skills',
+          kind: 'skills-empty',
+        })
+      } else {
+        lines.forEach((line, i) => {
+          units.push({
+            key: `skills-line-${i}`,
+            sectionId: 'skills',
+            kind: 'skills-line',
+            line,
+          })
+        })
+      }
       continue
     }
     if (id === 'experience') {
@@ -379,13 +393,25 @@ function buildFlowUnits(resume: ResumeData): FlowUnit[] {
           kind: 'experience-empty',
         })
       } else {
-        for (const entry of resume.experience) {
+        for (const entry of sortExperience(resume.experience)) {
           units.push({
-            key: `experience-${entry.id}`,
+            key: `experience-header-${entry.id}`,
             sectionId: 'experience',
-            kind: 'experience-entry',
+            kind: 'experience-header',
             entry,
           })
+          entry.bullets
+            .map((b) => b.trim())
+            .filter(Boolean)
+            .forEach((bullet, i) => {
+              units.push({
+                key: `experience-bullet-${entry.id}-${i}`,
+                sectionId: 'experience',
+                kind: 'experience-bullet',
+                entryId: entry.id,
+                bullet,
+              })
+            })
         }
       }
       continue
@@ -404,7 +430,7 @@ function buildFlowUnits(resume: ResumeData): FlowUnit[] {
           kind: 'education-empty',
         })
       } else {
-        for (const entry of resume.education) {
+        for (const entry of sortEducation(resume.education)) {
           units.push({
             key: `education-${entry.id}`,
             sectionId: 'education',
@@ -419,56 +445,127 @@ function buildFlowUnits(resume: ResumeData): FlowUnit[] {
   return units
 }
 
+function gapBefore(unit: FlowUnit, page: FlowUnit[]): number {
+  if (page.length === 0) return 0
+
+  if (unit.kind === 'experience-bullet') return BULLET_GAP_PX
+  if (unit.kind === 'skills-line') return SKILL_GAP_PX
+
+  if (
+    unit.kind === 'experience-header' ||
+    unit.kind === 'experience-empty' ||
+    unit.kind === 'education-entry' ||
+    unit.kind === 'education-empty'
+  ) {
+    return ENTRY_GAP_PX
+  }
+
+  return SECTION_GAP_PX
+}
+
 function packUnits(
   units: FlowUnit[],
   heights: Record<string, number>,
   maxHeight: number,
 ): FlowUnit[][] {
+  // Until measured, keep a single page to avoid wrong multi-page flashes
+  if (units.length > 0 && Object.keys(heights).length === 0) {
+    return [units]
+  }
+
   const pages: FlowUnit[][] = []
   let current: FlowUnit[] = []
   let used = 0
+  const limit = Math.max(80, maxHeight - PAGE_PACK_BUFFER_PX)
 
-  const gapBefore = (unit: FlowUnit, page: FlowUnit[]) => {
-    if (page.length === 0) return 0
-    if (
-      unit.kind === 'experience-entry' ||
-      unit.kind === 'education-entry' ||
-      unit.kind === 'experience-empty' ||
-      unit.kind === 'education-empty'
-    ) {
-      return ENTRY_GAP_PX
+  const heightOf = (key: string) => Math.ceil(heights[key] ?? 0)
+
+  const pushContinuedHeading = (
+    kind: 'experience' | 'education' | 'skills',
+  ) => {
+    if (kind === 'experience') {
+      const cont: FlowUnit = {
+        key: `experience-heading-cont-${pages.length}`,
+        sectionId: 'experience',
+        kind: 'experience-heading',
+        continued: true,
+      }
+      current.push(cont)
+      used += heightOf('experience-heading')
+    } else if (kind === 'education') {
+      const cont: FlowUnit = {
+        key: `education-heading-cont-${pages.length}`,
+        sectionId: 'education',
+        kind: 'education-heading',
+        continued: true,
+      }
+      current.push(cont)
+      used += heightOf('education-heading')
+    } else {
+      const cont: FlowUnit = {
+        key: `skills-heading-cont-${pages.length}`,
+        sectionId: 'skills',
+        kind: 'skills-heading',
+      }
+      current.push(cont)
+      used += heightOf('skills-heading')
     }
-    return SECTION_GAP_PX
   }
 
-  for (const unit of units) {
-    const h = heights[unit.key] ?? 0
-    const gap = gapBefore(unit, current)
+  const startNewPageFor = (unit: FlowUnit) => {
+    if (current.length === 0) return
+    pages.push(current)
+    current = []
+    used = 0
 
-    if (current.length > 0 && used + gap + h > maxHeight) {
-      pages.push(current)
-      current = []
-      used = 0
-
-      if (unit.kind === 'experience-entry') {
-        const cont: FlowUnit = {
-          key: `experience-heading-cont-${pages.length}`,
-          sectionId: 'experience',
-          kind: 'experience-heading',
-          continued: true,
+    if (
+      unit.kind === 'experience-header' ||
+      unit.kind === 'experience-bullet'
+    ) {
+      pushContinuedHeading('experience')
+      if (unit.kind === 'experience-bullet') {
+        const headerKey = `experience-header-${unit.entryId}`
+        const headerUnit = units.find(
+          (u) => u.kind === 'experience-header' && u.key === headerKey,
+        )
+        if (headerUnit && headerUnit.kind === 'experience-header') {
+          const contHeader: FlowUnit = {
+            ...headerUnit,
+            key: `${headerKey}-cont-${pages.length}`,
+          }
+          const hg = gapBefore(contHeader, current)
+          current.push(contHeader)
+          used += hg + heightOf(headerKey)
         }
-        current.push(cont)
-        used += heights['experience-heading'] ?? 24
-      } else if (unit.kind === 'education-entry') {
-        const cont: FlowUnit = {
-          key: `education-heading-cont-${pages.length}`,
-          sectionId: 'education',
-          kind: 'education-heading',
-          continued: true,
-        }
-        current.push(cont)
-        used += heights['education-heading'] ?? 24
       }
+    } else if (unit.kind === 'education-entry') {
+      pushContinuedHeading('education')
+    } else if (unit.kind === 'skills-line') {
+      pushContinuedHeading('skills')
+    }
+  }
+
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i]
+    const h = heightOf(unit.key)
+    const gap = gapBefore(unit, current)
+    let needed = gap + h
+
+    // Keep job header with at least the next bullet when possible
+    if (unit.kind === 'experience-header') {
+      const next = units[i + 1]
+      if (next?.kind === 'experience-bullet' && next.entryId === unit.entry.id) {
+        const pairExtra =
+          gapBefore(next, [...current, unit]) + heightOf(next.key)
+        // Only keep them together when the pair fits on a fresh page
+        if (h + pairExtra <= limit) {
+          needed += pairExtra
+        }
+      }
+    }
+
+    if (current.length > 0 && used + needed > limit) {
+      startNewPageFor(unit)
     }
 
     const g = gapBefore(unit, current)
@@ -498,10 +595,12 @@ function PageShell({
   children,
   pageIndex,
   styleVars,
+  margins,
 }: {
   children: ReactNode
   pageIndex: number
   styleVars: CSSProperties
+  margins: ResumeStyle['margins']
 }) {
   return (
     <article
@@ -510,7 +609,10 @@ function PageShell({
       style={{
         width: PAGE_WIDTH_PX,
         height: PAGE_HEIGHT_PX,
-        padding: `${PAGE_PADDING_Y_PX}px ${PAGE_PADDING_X_PX}px`,
+        paddingTop: margins.top,
+        paddingRight: margins.right,
+        paddingBottom: margins.bottom,
+        paddingLeft: margins.left,
         boxSizing: 'border-box',
         ...styleVars,
       }}
@@ -526,16 +628,29 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
       return <ContactBlock resume={resume} />
     case 'summary':
       return <SummaryBlock resume={resume} />
-    case 'skills':
-      return <SkillsBlock resume={resume} />
+    case 'skills-heading':
+      return <SectionHeading>{SECTION_LABELS.skills}</SectionHeading>
+    case 'skills-line':
+      return <SkillsLine line={unit.line} />
+    case 'skills-empty':
+      return (
+        <p
+          className="italic text-zinc-400"
+          style={{ fontSize: 'var(--fs-muted)' }}
+        >
+          No skills yet.
+        </p>
+      )
     case 'experience-heading':
       return (
         <SectionHeading continued={unit.continued}>
           {SECTION_LABELS.experience}
         </SectionHeading>
       )
-    case 'experience-entry':
-      return <ExperienceEntryBlock entry={unit.entry} />
+    case 'experience-header':
+      return <ExperienceHeaderBlock entry={unit.entry} />
+    case 'experience-bullet':
+      return <ExperienceBullet bullet={unit.bullet} />
     case 'experience-empty':
       return (
         <p
@@ -565,31 +680,28 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
   }
 }
 
-function unitGap(unit: FlowUnit, isFirstInGroup: boolean): number {
-  if (isFirstInGroup) return 0
-  if (
-    unit.kind === 'experience-entry' ||
-    unit.kind === 'education-entry' ||
-    unit.kind === 'experience-empty' ||
-    unit.kind === 'education-empty'
-  ) {
-    return ENTRY_GAP_PX
-  }
-  return 0
+function unitGap(unit: FlowUnit, prev: FlowUnit | undefined): number {
+  if (!prev) return 0
+  return gapBefore(unit, [prev])
 }
 
 export function ResumeDocument({
   resume,
-  style,
+  style: rawStyle,
   onEditSection,
 }: ResumeDocumentProps) {
   const measureRef = useRef<HTMLDivElement>(null)
   const [heights, setHeights] = useState<Record<string, number>>({})
 
+  const style = normalizeResumeStyle(rawStyle)
   const styleVars = useMemo(
     () => typographyCssVars(style) as CSSProperties,
     [style],
   )
+  const margins = style.margins
+  const contentHeight = pageContentHeight(margins.top, margins.bottom)
+  const contentWidth = pageContentWidth(margins.left, margins.right)
+
   const units = useMemo(() => buildFlowUnits(resume), [resume])
   const measureKey = useMemo(
     () => JSON.stringify({ resume, style }),
@@ -602,14 +714,21 @@ export function ResumeDocument({
     const next: Record<string, number> = {}
     for (const el of root.querySelectorAll<HTMLElement>('[data-measure-id]')) {
       const id = el.dataset.measureId
-      if (id) next[id] = el.getBoundingClientRect().height
+      if (!id) continue
+      // Use offsetHeight (layout px), not getBoundingClientRect — the preview
+      // is CSS-scaled, and bounding rects shrink with that transform, which
+      // underestimates heights and lets content pack past the page margins.
+      const cs = window.getComputedStyle(el)
+      const mt = parseFloat(cs.marginTop) || 0
+      const mb = parseFloat(cs.marginBottom) || 0
+      next[id] = el.offsetHeight + mt + mb
     }
     setHeights(next)
   }, [measureKey])
 
   const pages = useMemo(
-    () => packUnits(units, heights, PAGE_CONTENT_HEIGHT_PX),
-    [units, heights],
+    () => packUnits(units, heights, contentHeight),
+    [units, heights, contentHeight],
   )
 
   return (
@@ -619,7 +738,7 @@ export function ResumeDocument({
         ref={measureRef}
         className="pointer-events-none absolute left-[-9999px] top-0"
         style={{
-          width: PAGE_WIDTH_PX - PAGE_PADDING_X_PX * 2,
+          width: contentWidth,
           ...styleVars,
         }}
       >
@@ -634,22 +753,31 @@ export function ResumeDocument({
         {pages.map((pageUnits, pageIndex) => {
           const groups = groupBySection(pageUnits)
           return (
-            <PageShell key={pageIndex} pageIndex={pageIndex} styleVars={styleVars}>
-              <div className="flex flex-col" style={{ gap: SECTION_GAP_PX }}>
-                {groups.map((group) => {
+            <PageShell
+              key={pageIndex}
+              pageIndex={pageIndex}
+              styleVars={styleVars}
+              margins={margins}
+            >
+              <div className="flex flex-col">
+                {groups.map((group, groupIndex) => {
                   const sectionId = group[0].sectionId
+                  const prevGroup = groups[groupIndex - 1]
+                  const groupGap = prevGroup
+                    ? gapBefore(group[0], [prevGroup[prevGroup.length - 1]])
+                    : 0
                   const isContinued =
-                    group[0].kind === 'experience-heading' ||
-                    group[0].kind === 'education-heading'
-                      ? group[0].continued
-                      : false
+                    group[0].key.includes('-cont-') ||
+                    ((group[0].kind === 'experience-heading' ||
+                      group[0].kind === 'education-heading') &&
+                      group[0].continued)
 
                   const body = (
                     <div>
                       {group.map((unit, i) => (
                         <div
                           key={unit.key}
-                          style={{ marginTop: unitGap(unit, i === 0) }}
+                          style={{ marginTop: unitGap(unit, group[i - 1]) }}
                         >
                           {renderUnit(unit, resume)}
                         </div>
@@ -657,21 +785,28 @@ export function ResumeDocument({
                     </div>
                   )
 
-                  if (isContinued) {
-                    return (
-                      <div key={`${pageIndex}-${sectionId}-cont`}>{body}</div>
-                    )
-                  }
-
-                  return (
+                  const wrap = isContinued ? (
+                    <div key={`${pageIndex}-${sectionId}-cont-${groupIndex}`}>
+                      {body}
+                    </div>
+                  ) : (
                     <SectionChrome
-                      key={`${pageIndex}-${sectionId}`}
+                      key={`${pageIndex}-${sectionId}-${groupIndex}`}
                       id={sectionId}
                       disableDrag={sectionId === 'contact'}
                       onEdit={() => onEditSection(sectionId)}
                     >
                       {body}
                     </SectionChrome>
+                  )
+
+                  return (
+                    <div
+                      key={`${pageIndex}-group-${groupIndex}`}
+                      style={{ marginTop: groupGap }}
+                    >
+                      {wrap}
+                    </div>
                   )
                 })}
               </div>

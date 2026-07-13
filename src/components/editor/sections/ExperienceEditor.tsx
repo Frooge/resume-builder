@@ -1,19 +1,22 @@
+import { useMemo } from 'react'
 import { useResumeStore } from '../../../store/resumeStore'
+import { sortExperience } from '../../../lib/sortEntries'
 import { Field, MonthYearField, TextArea } from '../fields'
 
 export function ExperienceEditor() {
   const experience = useResumeStore((s) => s.resume.experience)
+  const sorted = useMemo(() => sortExperience(experience), [experience])
   const addExperience = useResumeStore((s) => s.addExperience)
   const updateExperience = useResumeStore((s) => s.updateExperience)
   const removeExperience = useResumeStore((s) => s.removeExperience)
 
   return (
     <div className="space-y-4">
-      {experience.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className="text-xs text-zinc-500">No experience entries yet.</p>
       ) : null}
 
-      {experience.map((entry, index) => (
+      {sorted.map((entry, index) => (
         <div
           key={entry.id}
           className="space-y-2.5 rounded border border-zinc-200 bg-zinc-50/80 p-3"
@@ -63,7 +66,7 @@ export function ExperienceEditor() {
               }
             />
           </div>
-          <label className="flex items-center gap-2 text-xs text-zinc-600">
+          <div className="flex items-center gap-2 text-xs text-zinc-600">
             <input
               type="checkbox"
               checked={entry.current}
@@ -74,8 +77,8 @@ export function ExperienceEditor() {
                 })
               }
             />
-            Currently work here
-          </label>
+            <span>Currently work here</span>
+          </div>
           <TextArea
             label="Bullets (one per line)"
             value={entry.bullets.join('\n')}

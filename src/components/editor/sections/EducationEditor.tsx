@@ -1,19 +1,22 @@
+import { useMemo } from 'react'
 import { useResumeStore } from '../../../store/resumeStore'
+import { sortEducation } from '../../../lib/sortEntries'
 import { Field, MonthYearField, TextArea } from '../fields'
 
 export function EducationEditor() {
   const education = useResumeStore((s) => s.resume.education)
+  const sorted = useMemo(() => sortEducation(education), [education])
   const addEducation = useResumeStore((s) => s.addEducation)
   const updateEducation = useResumeStore((s) => s.updateEducation)
   const removeEducation = useResumeStore((s) => s.removeEducation)
 
   return (
     <div className="space-y-4">
-      {education.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className="text-xs text-zinc-500">No education entries yet.</p>
       ) : null}
 
-      {education.map((entry, index) => (
+      {sorted.map((entry, index) => (
         <div
           key={entry.id}
           className="space-y-2.5 rounded border border-zinc-200 bg-zinc-50/80 p-3"

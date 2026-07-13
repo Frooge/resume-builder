@@ -44,6 +44,26 @@ export const FONT_SIZE_OPTIONS: { id: FontSizeId; label: string; scale: number }
 export const DEFAULT_RESUME_STYLE: ResumeStyle = {
   fontFamily: 'georgia',
   fontSize: 'medium',
+  margins: {
+    top: 40,
+    right: 48,
+    bottom: 40,
+    left: 48,
+  },
+}
+
+/** Fill missing fields for older localStorage payloads. */
+export function normalizeResumeStyle(
+  style?: Partial<ResumeStyle> | null,
+): ResumeStyle {
+  return {
+    fontFamily: style?.fontFamily ?? DEFAULT_RESUME_STYLE.fontFamily,
+    fontSize: style?.fontSize ?? DEFAULT_RESUME_STYLE.fontSize,
+    margins: {
+      ...DEFAULT_RESUME_STYLE.margins,
+      ...style?.margins,
+    },
+  }
 }
 
 /** Base sizes in px at medium scale (matches the original template). */

@@ -45,9 +45,17 @@ export type ResumeFontId =
 
 export type FontSizeId = 'small' | 'medium' | 'large'
 
+export interface PageMargins {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
 export interface ResumeStyle {
   fontFamily: ResumeFontId
   fontSize: FontSizeId
+  margins: PageMargins
 }
 
 export interface ResumeData {

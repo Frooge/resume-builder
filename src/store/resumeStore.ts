@@ -1,11 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { createEmptyResume, createId, sampleResume } from '../lib/sampleResume'
-import { DEFAULT_RESUME_STYLE } from '../lib/typography'
+import { DEFAULT_RESUME_STYLE, normalizeResumeStyle } from '../lib/typography'
 import type {
   Contact,
   EducationEntry,
   ExperienceEntry,
+  PageMargins,
   ResumeData,
   ResumeStyle,
   SavedResume,
@@ -26,7 +27,9 @@ interface ResumeStore {
   setContact: (contact: Partial<Contact>) => void
   setSummary: (summary: string) => void
   setSkills: (skills: string[]) => void
-  setStyle: (patch: Partial<ResumeStyle>) => void
+  setStyle: (patch: Partial<Omit<ResumeStyle, 'margins'>> & {
+    margins?: Partial<PageMargins>
+  }) => void
   addExperience: () => void
   updateExperience: (id: string, patch: Partial<ExperienceEntry>) => void
   removeExperience: (id: string) => void
@@ -106,7 +109,14 @@ export const useResumeStore = create<ResumeStore>()(
 
       setStyle: (patch) =>
         set((state) => ({
-          style: { ...state.style, ...patch },
+          style: normalizeResumeStyle({
+            ...state.style,
+            ...patch,
+            margins: {
+              ...state.style.margins,
+              ...patch.margins,
+            },
+          }),
         })),
 
       addExperience: () =>
@@ -322,6 +332,18 @@ export const useResumeStore = create<ResumeStore>()(
         savedResumes: state.savedResumes,
         activeSavedId: state.activeSavedId,
       }),
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<ResumeStore>
+        return {
+          ...current,
+          ...p,
+          style: normalizeResumeStyle(p.style),
+          savedResumes: (p.savedResumes ?? current.savedResumes).map((s) => ({
+            ...s,
+            style: normalizeResumeStyle(s.style),
+          })),
+        }
+      },
     },
   ),
 )

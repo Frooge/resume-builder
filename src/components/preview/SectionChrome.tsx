@@ -37,11 +37,15 @@ export function SectionChrome({
     <div
       ref={setNodeRef}
       style={style}
-      className="group relative -ml-9 pl-9 [[data-exporting=true]_&]:ml-0 [[data-exporting=true]_&]:pl-0"
+      className="group relative"
       data-section={id}
     >
-      {/* Gutter is inside the hover box (-ml/pl), so icons stay reachable */}
-      <div className="absolute left-0 top-0 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [[data-exporting=true]_&]:hidden">
+      {/* Invisible bridge so hover stays active when moving to icons (no content-width change) */}
+      <div
+        className="absolute inset-y-0 -left-9 w-9 [[data-exporting=true]_&]:hidden"
+        aria-hidden
+      />
+      <div className="absolute -left-9 top-0 z-10 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [[data-exporting=true]_&]:hidden">
         {!disableDrag ? (
           <button
             type="button"

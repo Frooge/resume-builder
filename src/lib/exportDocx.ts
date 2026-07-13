@@ -10,6 +10,8 @@ import { saveAs } from 'file-saver'
 import type { ResumeData, ResumeStyle, SectionId } from '../types/resume'
 import { SECTION_LABELS } from '../types/resume'
 import { formatDateRange, formatYearRange } from './formatDate'
+import { sortEducation, sortExperience } from './sortEntries'
+import { pxToTwip } from './pageSize'
 import {
   DEFAULT_RESUME_STYLE,
   getFontDocx,
@@ -158,7 +160,7 @@ function buildExperience(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
   if (resume.experience.length === 0) return []
   const paras: Paragraph[] = [heading(SECTION_LABELS.experience, ctx)]
 
-  for (const entry of resume.experience) {
+  for (const entry of sortExperience(resume.experience)) {
     const dates = formatDateRange(entry.startDate, entry.endDate, entry.current)
     paras.push(
       new Paragraph({
@@ -201,7 +203,7 @@ function buildEducation(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
   if (resume.education.length === 0) return []
   const paras: Paragraph[] = [heading(SECTION_LABELS.education, ctx)]
 
-  for (const entry of resume.education) {
+  for (const entry of sortEducation(resume.education)) {
     const years = formatYearRange(entry.startDate, entry.endDate)
     paras.push(
       new Paragraph({
@@ -267,10 +269,10 @@ export async function exportDocx(
         properties: {
           page: {
             margin: {
-              top: 720,
-              right: 720,
-              bottom: 720,
-              left: 720,
+              top: pxToTwip(style.margins.top),
+              right: pxToTwip(style.margins.right),
+              bottom: pxToTwip(style.margins.bottom),
+              left: pxToTwip(style.margins.left),
             },
           },
         },
