@@ -88,6 +88,11 @@ export function getFontDocx(id: ResumeFontId): string {
   return FONT_OPTIONS.find((f) => f.id === id)?.docx ?? 'Times New Roman'
 }
 
+/** Standard PDF fonts: no embedding, small file, extractable text. */
+export function getFontPdf(id: ResumeFontId): 'times' | 'helvetica' {
+  return id === 'arial' || id === 'calibri' ? 'helvetica' : 'times'
+}
+
 export function getFontScale(id: FontSizeId): number {
   return FONT_SIZE_OPTIONS.find((f) => f.id === id)?.scale ?? 1
 }

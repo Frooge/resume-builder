@@ -46,6 +46,7 @@ interface ResumeStore {
   saveCurrent: (name: string) => string
   saveAsNew: (name: string) => string
   loadSaved: (id: string) => void
+  applyImported: (imported: { resume: ResumeData; style: ResumeStyle }) => void
   deleteSaved: (id: string) => void
   renameSaved: (id: string, name: string) => void
 }
@@ -306,6 +307,17 @@ export const useResumeStore = create<ResumeStore>()(
           },
         })
       },
+
+      applyImported: ({ resume, style }) =>
+        set({
+          resume: structuredClone(resume),
+          style: normalizeResumeStyle(style),
+          activeSavedId: null,
+          ui: {
+            openSections: ['contact'],
+            focusSectionRequest: null,
+          },
+        }),
 
       deleteSaved: (id) =>
         set((state) => ({

@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { resumeImporters, type ResumeImporter } from '../../lib/import'
+import { ResumeFileError } from '../../lib/resumeFile'
 import { useResumeStore } from '../../store/resumeStore'
 import {
   ToolbarMenu,
@@ -24,8 +26,11 @@ export function LibraryToolbar() {
   const saveCurrent = useResumeStore((s) => s.saveCurrent)
   const saveAsNew = useResumeStore((s) => s.saveAsNew)
   const loadSaved = useResumeStore((s) => s.loadSaved)
+  const applyImported = useResumeStore((s) => s.applyImported)
   const deleteSaved = useResumeStore((s) => s.deleteSaved)
   const newResume = useResumeStore((s) => s.newResume)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingImporter = useRef<ResumeImporter | null>(null)
 
   const activeName =
     savedResumes.find((s) => s.id === activeSavedId)?.name ?? ''
@@ -64,6 +69,43 @@ export function LibraryToolbar() {
     close()
   }
 
+  const handleImportPick = (importer: ResumeImporter, close: () => void) => {
+    pendingImporter.current = importer
+    close()
+    const input = fileInputRef.current
+    if (!input) return
+    input.accept = importer.accept
+    input.value = ''
+    input.click()
+  }
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    const importer = pendingImporter.current
+    pendingImporter.current = null
+    event.target.value = ''
+    if (!file || !importer) return
+
+    try {
+      const imported = await importer.parse(file)
+      if (
+        !window.confirm(
+          'Import this resume? Your current editor content will be replaced.',
+        )
+      ) {
+        return
+      }
+      applyImported(imported)
+      setStatus('Imported')
+    } catch (error) {
+      const message =
+        error instanceof ResumeFileError
+          ? error.message
+          : 'Could not import this file.'
+      window.alert(message)
+    }
+  }
+
   const handleLoad = (id: string, close: () => void) => {
     if (id === activeSavedId) {
       close()
@@ -99,6 +141,24 @@ export function LibraryToolbar() {
           </>
         )}
       </ToolbarSplitMenu>
+      <ToolbarMenu label="Import" align="right">
+        {(close) =>
+          resumeImporters.map((importer) => (
+            <ToolbarMenuItem
+              key={importer.id}
+              onClick={() => handleImportPick(importer, close)}
+            >
+              {importer.label}
+            </ToolbarMenuItem>
+          ))
+        }
+      </ToolbarMenu>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(event) => void handleImportFile(event)}
+      />
       <ToolbarMenu label="Load" align="right">
         {(close) =>
           savedResumes.length === 0 ? (

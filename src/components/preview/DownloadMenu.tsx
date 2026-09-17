@@ -1,25 +1,24 @@
 import { useState } from 'react'
 import { useResumeStore } from '../../store/resumeStore'
 import { exportDocx } from '../../lib/exportDocx'
+import { exportJson } from '../../lib/exportJson'
 import { exportPdf } from '../../lib/exportPdf'
-import { ToolbarMenu, ToolbarMenuItem } from './ToolbarMenu'
+import { ToolbarMenu, ToolbarMenuItem, ToolbarMenuSeparator } from './ToolbarMenu'
 
 export function DownloadMenu() {
   const resume = useResumeStore((s) => s.resume)
   const style = useResumeStore((s) => s.style)
-  const [exporting, setExporting] = useState<'pdf' | 'docx' | null>(null)
+  const [exporting, setExporting] = useState<'pdf' | 'docx' | 'json' | null>(
+    null,
+  )
 
   const handlePdf = async (close: () => void) => {
-    const el = document.getElementById('resume-document')
-    if (!el) return
     close()
     setExporting('pdf')
-    el.dataset.exporting = 'true'
     try {
       const name = resume.contact.fullName || 'resume'
-      await exportPdf(el, name)
+      await exportPdf(resume, name, style)
     } finally {
-      delete el.dataset.exporting
       setExporting(null)
     }
   }
@@ -35,12 +34,25 @@ export function DownloadMenu() {
     }
   }
 
+  const handleJson = async (close: () => void) => {
+    close()
+    setExporting('json')
+    try {
+      const name = resume.contact.fullName || 'resume'
+      await exportJson(resume, name, style)
+    } finally {
+      setExporting(null)
+    }
+  }
+
   const label =
     exporting === 'pdf'
       ? 'Exporting PDF…'
       : exporting === 'docx'
         ? 'Exporting DOCX…'
-        : 'Download'
+        : exporting === 'json'
+          ? 'Exporting JSON…'
+          : 'Download'
 
   return (
     <ToolbarMenu
@@ -56,6 +68,10 @@ export function DownloadMenu() {
           </ToolbarMenuItem>
           <ToolbarMenuItem onClick={() => void handleDocx(close)}>
             Download DOCX
+          </ToolbarMenuItem>
+          <ToolbarMenuSeparator />
+          <ToolbarMenuItem onClick={() => void handleJson(close)}>
+            Download JSON
           </ToolbarMenuItem>
         </>
       )}
