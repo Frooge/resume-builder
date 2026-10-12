@@ -1,10 +1,16 @@
 import { jsPDF } from 'jspdf'
 import type { ResumeData, ResumeStyle, SectionId } from '../types/resume'
-import { SECTION_LABELS } from '../types/resume'
-import { contactLinks, type ContactItem } from './contactLinks'
-import { formatDateRange, formatYearRange } from './formatDate'
+import { REFERENCES_ON_REQUEST_TEXT, SECTION_LABELS } from '../types/resume'
+import {
+  contactLinks,
+  referenceContactItems,
+  referenceRole,
+  type ContactItem,
+  type ReferenceContactItem,
+} from './contactLinks'
+import { formatDateRange, formatMonthYear, formatYearRange } from './formatDate'
 import { toWinAnsi } from './pdfText'
-import { sortEducation, sortExperience } from './sortEntries'
+import { sortCertifications, sortEducation, sortExperience } from './sortEntries'
 import { visibleSectionOrder } from './sectionOrder'
 import {
   DEFAULT_RESUME_STYLE,
@@ -22,6 +28,7 @@ const PT_PER_PX = 72 / PX_PER_INCH
 const SECTION_GAP_MM = pxToMm(18)
 const ENTRY_GAP_MM = pxToMm(14)
 const TIGHT_GAP_MM = pxToMm(2)
+const ITEM_GAP_MM = pxToMm(6)
 const HEADING_AFTER_MM = pxToMm(8)
 const RULE_WIDTH_MM = 0.25
 
@@ -182,6 +189,32 @@ function writeBullet(w: PdfWriter, text: string) {
   })
 }
 
+const TITLE_COLOR: [number, number, number] = [24, 24, 27]
+const DATE_COLOR: [number, number, number] = [113, 113, 122]
+
+/** A bold title with an optional date right-aligned on its first line. */
+function writeTitleWithDate(
+  w: PdfWriter,
+  title: string,
+  date: string,
+  opts: { size: number; leading: number },
+) {
+  setStyle(w, { size: w.sizes.dates, color: DATE_COLOR })
+  const dateWidth = date ? w.doc.getTextWidth(toWinAnsi(date)) + 3 : 0
+  const titleOpts = { ...opts, bold: true, color: TITLE_COLOR }
+  setStyle(w, titleOpts)
+  const lines = wrap(w, title, Math.max(40, w.width - dateWidth))
+
+  writeLines(w, lines.slice(0, 1), titleOpts)
+  if (date) {
+    const firstBaseline =
+      w.y - lineHeightMm(opts.size, opts.leading) + pxToMm(opts.size) * 0.85
+    setStyle(w, { size: w.sizes.dates, color: DATE_COLOR })
+    w.doc.text(toWinAnsi(date), w.right, firstBaseline, { align: 'right' })
+  }
+  if (lines.length > 1) writeLines(w, lines.slice(1), titleOpts)
+}
+
 function heading(w: PdfWriter, text: string) {
   w.y += SECTION_GAP_MM
   writeLines(w, [text.toUpperCase()], {
@@ -299,36 +332,10 @@ function buildExperience(w: PdfWriter, resume: ResumeData) {
   for (const entry of sortExperience(resume.experience)) {
     w.y += ENTRY_GAP_MM
     const dates = formatDateRange(entry.startDate, entry.endDate, entry.current)
-    const role = entry.role || 'Role'
-
-    setStyle(w, { size: w.sizes.dates, color: [113, 113, 122] })
-    const dateWidth = dates ? w.doc.getTextWidth(dates) + 3 : 0
-    setStyle(w, {
+    writeTitleWithDate(w, entry.role || 'Role', dates, {
       size: w.sizes.roleTitle,
-      bold: true,
-      color: [24, 24, 27],
-    })
-    const roleLines = wrap(w, role, Math.max(40, w.width - dateWidth))
-
-    writeLines(w, roleLines.slice(0, 1), {
-      size: w.sizes.roleTitle,
-      bold: true,
-      color: [24, 24, 27],
       leading: 1.25,
     })
-    if (dates) {
-      const firstBaseline = w.y - lineHeightMm(w.sizes.roleTitle, 1.25) + pxToMm(w.sizes.roleTitle) * 0.85
-      setStyle(w, { size: w.sizes.dates, color: [113, 113, 122] })
-      w.doc.text(dates, w.right, firstBaseline, { align: 'right' })
-    }
-    if (roleLines.length > 1) {
-      writeLines(w, roleLines.slice(1), {
-        size: w.sizes.roleTitle,
-        bold: true,
-        color: [24, 24, 27],
-        leading: 1.25,
-      })
-    }
 
     if (entry.company) {
       writeWrapped(w, entry.company, {
@@ -398,12 +405,107 @@ function buildSkills(w: PdfWriter, resume: ResumeData) {
 }
 
 function buildCertifications(w: PdfWriter, resume: ResumeData) {
-  const lines = resume.certifications.map((s) => s.trim()).filter(Boolean)
-  if (lines.length === 0) return
+  if (resume.certifications.length === 0) return
   heading(w, SECTION_LABELS.certifications)
+  for (const entry of sortCertifications(resume.certifications)) {
+    w.y += ITEM_GAP_MM
+    writeTitleWithDate(w, entry.name || 'Certification', formatMonthYear(entry.date), {
+      size: w.sizes.body,
+      leading: 1.3,
+    })
+    if (entry.issuer.trim()) {
+      writeWrapped(w, entry.issuer, {
+        size: w.sizes.body,
+        color: [63, 63, 70],
+        leading: 1.35,
+      })
+    }
+  }
+}
+
+/** "phone  |  email" on one line when it fits, else one item per line; the email is a link. */
+function writeReferenceContacts(w: PdfWriter, items: ReferenceContactItem[]) {
+  if (items.length === 0) return
+  const size = w.sizes.dates
+  setStyle(w, { size, color: DATE_COLOR })
+  const sep = '  |  '
+  const sepWidth = w.doc.getTextWidth(sep)
+  const segs = items.map((item) => {
+    const text = toWinAnsi(item.text)
+    return { text, href: item.href, width: w.doc.getTextWidth(text) }
+  })
+  const total =
+    segs.reduce((sum, seg) => sum + seg.width, 0) + sepWidth * (segs.length - 1)
+  const lines = total <= w.width ? [segs] : segs.map((seg) => [seg])
+
+  const lh = lineHeightMm(size, 1.4)
+  const ascent = pxToMm(size)
   for (const line of lines) {
-    w.y += TIGHT_GAP_MM
-    writeBullet(w, line)
+    ensureSpace(w, lh)
+    const baseline = w.y + ascent * 0.85
+    let x = w.left
+    line.forEach((seg, i) => {
+      if (i > 0) {
+        w.doc.text(sep, x, baseline)
+        x += sepWidth
+      }
+      w.doc.text(seg.text, x, baseline)
+      if (seg.href) w.doc.link(x, w.y, seg.width, lh, { url: seg.href })
+      x += seg.width
+    })
+    w.y += lh
+  }
+}
+
+function buildReferences(w: PdfWriter, resume: ResumeData) {
+  if (resume.referencesOnRequest) {
+    heading(w, SECTION_LABELS.references)
+    w.y += ITEM_GAP_MM
+    writeWrapped(w, REFERENCES_ON_REQUEST_TEXT, {
+      size: w.sizes.body,
+      color: [63, 63, 70],
+      leading: 1.45,
+    })
+    return
+  }
+  if (resume.references.length === 0) return
+  heading(w, SECTION_LABELS.references)
+
+  for (const entry of resume.references) {
+    w.y += ENTRY_GAP_MM
+    const role = referenceRole(entry)
+    const relationship = entry.relationship.trim()
+    const contacts = referenceContactItems(entry)
+    // Keep each reference on one page, as the preview does
+    ensureSpace(
+      w,
+      lineHeightMm(w.sizes.roleTitle, 1.3) +
+        (role ? lineHeightMm(w.sizes.body, 1.4) : 0) +
+        (relationship ? lineHeightMm(w.sizes.details, 1.4) : 0) +
+        (contacts.length > 0 ? lineHeightMm(w.sizes.dates, 1.4) : 0),
+    )
+
+    writeWrapped(w, entry.name || 'Reference', {
+      size: w.sizes.roleTitle,
+      bold: true,
+      color: TITLE_COLOR,
+      leading: 1.3,
+    })
+    if (role) {
+      writeWrapped(w, role, {
+        size: w.sizes.body,
+        color: [63, 63, 70],
+        leading: 1.4,
+      })
+    }
+    if (relationship) {
+      writeWrapped(w, relationship, {
+        size: w.sizes.details,
+        color: [82, 82, 91],
+        leading: 1.4,
+      })
+    }
+    writeReferenceContacts(w, contacts)
   }
 }
 
@@ -416,6 +518,7 @@ const BUILDERS: Record<
   education: buildEducation,
   skills: buildSkills,
   certifications: buildCertifications,
+  references: buildReferences,
 }
 
 export function buildResumePdf(

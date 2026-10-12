@@ -7,16 +7,31 @@ import {
   type ReactNode,
 } from 'react'
 import type {
+  CertificationEntry,
   EducationEntry,
   ExperienceEntry,
+  ReferenceEntry,
   ResumeData,
   ResumeStyle,
   SectionId,
 } from '../../types/resume'
-import { SECTION_LABELS } from '../../types/resume'
-import { formatDateRange, formatYearRange } from '../../lib/formatDate'
-import { contactLinks, type ContactItemKey } from '../../lib/contactLinks'
-import { sortEducation, sortExperience } from '../../lib/sortEntries'
+import { REFERENCES_ON_REQUEST_TEXT, SECTION_LABELS } from '../../types/resume'
+import {
+  formatDateRange,
+  formatMonthYear,
+  formatYearRange,
+} from '../../lib/formatDate'
+import {
+  contactLinks,
+  referenceContactItems,
+  referenceRole,
+  type ContactItemKey,
+} from '../../lib/contactLinks'
+import {
+  sortCertifications,
+  sortEducation,
+  sortExperience,
+} from '../../lib/sortEntries'
 import { isPinnedSection, visibleSectionOrder } from '../../lib/sectionOrder'
 import {
   PAGE_GAP_PX,
@@ -39,6 +54,7 @@ const SECTION_GAP_PX = 18
 const ENTRY_GAP_PX = 14
 const BULLET_GAP_PX = 2
 const SKILL_GAP_PX = 2
+const ITEM_GAP_PX = 6
 
 type FlowUnit =
   | { key: string; sectionId: SectionId; kind: 'contact' }
@@ -50,18 +66,33 @@ type FlowUnit =
       key: string
       sectionId: 'certifications'
       kind: 'certifications-heading'
+      continued: boolean
     }
   | {
       key: string
       sectionId: 'certifications'
-      kind: 'certifications-bullet'
-      line: string
+      kind: 'certifications-entry'
+      entry: CertificationEntry
     }
   | {
       key: string
       sectionId: 'certifications'
       kind: 'certifications-empty'
     }
+  | {
+      key: string
+      sectionId: 'references'
+      kind: 'references-heading'
+      continued: boolean
+    }
+  | {
+      key: string
+      sectionId: 'references'
+      kind: 'references-entry'
+      entry: ReferenceEntry
+    }
+  | { key: string; sectionId: 'references'; kind: 'references-on-request' }
+  | { key: string; sectionId: 'references'; kind: 'references-empty' }
   | {
       key: string
       sectionId: 'experience'
@@ -355,6 +386,95 @@ function EducationEntryBlock({ entry }: { entry: EducationEntry }) {
   )
 }
 
+function CertificationEntryBlock({ entry }: { entry: CertificationEntry }) {
+  const date = formatMonthYear(entry.date)
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <p
+          className="font-semibold text-zinc-900"
+          style={{ fontSize: 'var(--fs-body)' }}
+        >
+          {entry.name || 'Certification'}
+        </p>
+        {date ? (
+          <p
+            className="shrink-0 font-normal text-zinc-500"
+            style={{ fontSize: 'var(--fs-dates)' }}
+          >
+            {date}
+          </p>
+        ) : null}
+      </div>
+      {entry.issuer.trim() ? (
+        <p
+          className="font-normal text-zinc-700"
+          style={{ fontSize: 'var(--fs-body)' }}
+        >
+          {entry.issuer}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function ReferenceEntryBlock({ entry }: { entry: ReferenceEntry }) {
+  const role = referenceRole(entry)
+  const contacts = referenceContactItems(entry)
+
+  return (
+    <div>
+      <p
+        className="font-semibold text-zinc-900"
+        style={{ fontSize: 'var(--fs-role-title)' }}
+      >
+        {entry.name || 'Reference'}
+      </p>
+      {role ? (
+        <p
+          className="font-normal leading-[1.4] text-zinc-700"
+          style={{ fontSize: 'var(--fs-body)' }}
+        >
+          {role}
+        </p>
+      ) : null}
+      {entry.relationship.trim() ? (
+        <p
+          className="font-normal text-zinc-600"
+          style={{ fontSize: 'var(--fs-details)' }}
+        >
+          {entry.relationship}
+        </p>
+      ) : null}
+      {contacts.length > 0 ? (
+        <p
+          className="font-normal text-zinc-500"
+          style={{ fontSize: 'var(--fs-dates)' }}
+        >
+          {contacts.map((item, i) => (
+            <span key={item.text}>
+              {i > 0 ? <span className="whitespace-pre">{'  |  '}</span> : null}
+              {item.href ? (
+                <a
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-inherit no-underline"
+                >
+                  {item.text}
+                </a>
+              ) : (
+                item.text
+              )}
+            </span>
+          ))}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 function buildFlowUnits(resume: ResumeData): FlowUnit[] {
   const body = visibleSectionOrder(resume)
   const units: FlowUnit[] = [
@@ -396,23 +516,54 @@ function buildFlowUnits(resume: ResumeData): FlowUnit[] {
         key: 'certifications-heading',
         sectionId: 'certifications',
         kind: 'certifications-heading',
+        continued: false,
       })
-      const lines = resume.certifications.map((s) => s.trim()).filter(Boolean)
-      if (lines.length === 0) {
+      if (resume.certifications.length === 0) {
         units.push({
           key: 'certifications-empty',
           sectionId: 'certifications',
           kind: 'certifications-empty',
         })
       } else {
-        lines.forEach((line, i) => {
+        for (const entry of sortCertifications(resume.certifications)) {
           units.push({
-            key: `certifications-bullet-${i}`,
+            key: `certifications-${entry.id}`,
             sectionId: 'certifications',
-            kind: 'certifications-bullet',
-            line,
+            kind: 'certifications-entry',
+            entry,
           })
+        }
+      }
+      continue
+    }
+    if (id === 'references') {
+      units.push({
+        key: 'references-heading',
+        sectionId: 'references',
+        kind: 'references-heading',
+        continued: false,
+      })
+      if (resume.referencesOnRequest) {
+        units.push({
+          key: 'references-on-request',
+          sectionId: 'references',
+          kind: 'references-on-request',
         })
+      } else if (resume.references.length === 0) {
+        units.push({
+          key: 'references-empty',
+          sectionId: 'references',
+          kind: 'references-empty',
+        })
+      } else {
+        for (const entry of resume.references) {
+          units.push({
+            key: `references-${entry.id}`,
+            sectionId: 'references',
+            kind: 'references-entry',
+            entry,
+          })
+        }
       }
       continue
     }
@@ -485,19 +636,22 @@ function buildFlowUnits(resume: ResumeData): FlowUnit[] {
 function gapBefore(unit: FlowUnit, page: FlowUnit[]): number {
   if (page.length === 0) return 0
 
-  if (
-    unit.kind === 'experience-bullet' ||
-    unit.kind === 'certifications-bullet'
-  ) {
-    return BULLET_GAP_PX
-  }
+  if (unit.kind === 'experience-bullet') return BULLET_GAP_PX
   if (unit.kind === 'skills-line') return SKILL_GAP_PX
+  if (
+    unit.kind === 'certifications-entry' ||
+    unit.kind === 'references-on-request'
+  ) {
+    return ITEM_GAP_PX
+  }
 
   if (
     unit.kind === 'experience-header' ||
     unit.kind === 'experience-empty' ||
     unit.kind === 'education-entry' ||
-    unit.kind === 'education-empty'
+    unit.kind === 'education-empty' ||
+    unit.kind === 'references-entry' ||
+    unit.kind === 'references-empty'
   ) {
     return ENTRY_GAP_PX
   }
@@ -523,7 +677,12 @@ function packUnits(
   const heightOf = (key: string) => Math.ceil(heights[key] ?? 0)
 
   const pushContinuedHeading = (
-    kind: 'experience' | 'education' | 'skills' | 'certifications',
+    kind:
+      | 'experience'
+      | 'education'
+      | 'skills'
+      | 'certifications'
+      | 'references',
   ) => {
     if (kind === 'experience') {
       const cont: FlowUnit = {
@@ -548,9 +707,19 @@ function packUnits(
         key: `certifications-heading-cont-${pages.length}`,
         sectionId: 'certifications',
         kind: 'certifications-heading',
+        continued: true,
       }
       current.push(cont)
       used += heightOf('certifications-heading')
+    } else if (kind === 'references') {
+      const cont: FlowUnit = {
+        key: `references-heading-cont-${pages.length}`,
+        sectionId: 'references',
+        kind: 'references-heading',
+        continued: true,
+      }
+      current.push(cont)
+      used += heightOf('references-heading')
     } else {
       const cont: FlowUnit = {
         key: `skills-heading-cont-${pages.length}`,
@@ -592,8 +761,10 @@ function packUnits(
       pushContinuedHeading('education')
     } else if (unit.kind === 'skills-line') {
       pushContinuedHeading('skills')
-    } else if (unit.kind === 'certifications-bullet') {
+    } else if (unit.kind === 'certifications-entry') {
       pushContinuedHeading('certifications')
+    } else if (unit.kind === 'references-entry') {
+      pushContinuedHeading('references')
     }
   }
 
@@ -694,9 +865,13 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
         </p>
       )
     case 'certifications-heading':
-      return <SectionHeading>{SECTION_LABELS.certifications}</SectionHeading>
-    case 'certifications-bullet':
-      return <ExperienceBullet bullet={unit.line} />
+      return (
+        <SectionHeading continued={unit.continued}>
+          {SECTION_LABELS.certifications}
+        </SectionHeading>
+      )
+    case 'certifications-entry':
+      return <CertificationEntryBlock entry={unit.entry} />
     case 'certifications-empty':
       return (
         <p
@@ -704,6 +879,32 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
           style={{ fontSize: 'var(--fs-muted)' }}
         >
           No certifications yet.
+        </p>
+      )
+    case 'references-heading':
+      return (
+        <SectionHeading continued={unit.continued}>
+          {SECTION_LABELS.references}
+        </SectionHeading>
+      )
+    case 'references-entry':
+      return <ReferenceEntryBlock entry={unit.entry} />
+    case 'references-on-request':
+      return (
+        <p
+          className="font-normal leading-[1.45] text-zinc-700"
+          style={{ fontSize: 'var(--fs-body)' }}
+        >
+          {REFERENCES_ON_REQUEST_TEXT}
+        </p>
+      )
+    case 'references-empty':
+      return (
+        <p
+          className="italic text-zinc-400"
+          style={{ fontSize: 'var(--fs-muted)' }}
+        >
+          No references yet.
         </p>
       )
     case 'experience-heading':
@@ -833,9 +1034,7 @@ export function ResumeDocument({
                     : 0
                   const isContinued =
                     group[0].key.includes('-cont-') ||
-                    ((group[0].kind === 'experience-heading' ||
-                      group[0].kind === 'education-heading') &&
-                      group[0].continued)
+                    ('continued' in group[0] && group[0].continued)
 
                   const body = (
                     <div>

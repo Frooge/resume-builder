@@ -5,6 +5,7 @@ export type SectionId =
   | 'education'
   | 'skills'
   | 'certifications'
+  | 'references'
 
 export interface Contact {
   fullName: string
@@ -41,6 +42,25 @@ export interface EducationEntry {
   details: string
 }
 
+export interface CertificationEntry {
+  id: string
+  name: string
+  issuer: string
+  /** YYYY-MM, or empty when undated. */
+  date: string
+}
+
+export interface ReferenceEntry {
+  id: string
+  name: string
+  title: string
+  company: string
+  /** How the reference knows you, e.g. "Former manager at Brightline". */
+  relationship: string
+  phone: string
+  email: string
+}
+
 export type ResumeFontId =
   | 'georgia'
   | 'times'
@@ -69,7 +89,10 @@ export interface ResumeData {
   experience: ExperienceEntry[]
   education: EducationEntry[]
   skills: string[]
-  certifications: string[]
+  certifications: CertificationEntry[]
+  references: ReferenceEntry[]
+  /** Show "References available upon request." instead of the entries. */
+  referencesOnRequest: boolean
   sectionOrder: SectionId[]
   hiddenSections: SectionId[]
 }
@@ -89,6 +112,7 @@ export const DEFAULT_SECTION_ORDER: SectionId[] = [
   'education',
   'skills',
   'certifications',
+  'references',
 ]
 
 export const SECTION_LABELS: Record<SectionId, string> = {
@@ -98,4 +122,8 @@ export const SECTION_LABELS: Record<SectionId, string> = {
   education: 'Education',
   skills: 'Skills',
   certifications: 'Certifications',
+  references: 'References',
 }
+
+/** Shown in place of the entries when `referencesOnRequest` is on. */
+export const REFERENCES_ON_REQUEST_TEXT = 'References available upon request.'

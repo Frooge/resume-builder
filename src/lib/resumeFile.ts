@@ -1,8 +1,10 @@
 import type {
+  CertificationEntry,
   Contact,
   EducationEntry,
   ExperienceEntry,
   FontSizeId,
+  ReferenceEntry,
   ResumeData,
   ResumeFontId,
   ResumeStyle,
@@ -14,9 +16,11 @@ import { withPinnedFirst } from './sectionOrder'
 import { DEFAULT_RESUME_STYLE, normalizeResumeStyle } from './typography'
 
 export const RESUME_FILE_KIND = 'resume-builder'
-export const RESUME_FILE_VERSION = 1
+/** v2: certifications became `{ name, issuer, date }` entries (v1 had strings). */
+export const RESUME_FILE_VERSION = 2
+const SUPPORTED_FILE_VERSIONS = new Set([1, RESUME_FILE_VERSION])
 
-export type ResumeExportV1 = {
+export type ResumeExport = {
   version: typeof RESUME_FILE_VERSION
   kind: typeof RESUME_FILE_KIND
   name: string
@@ -106,6 +110,51 @@ function parseEducation(raw: unknown): EducationEntry[] {
   })
 }
 
+/** Accepts v1's plain strings as well as entry objects. */
+function parseCertifications(raw: unknown): CertificationEntry[] {
+  if (!Array.isArray(raw)) return []
+  const entries: CertificationEntry[] = []
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      if (item.trim()) {
+        entries.push({
+          id: createId('cert'),
+          name: item.trim(),
+          issuer: '',
+          date: '',
+        })
+      }
+      continue
+    }
+    const o = isObj(item) ? item : {}
+    const id = asString(o.id).trim()
+    entries.push({
+      id: id || createId('cert'),
+      name: asString(o.name),
+      issuer: asString(o.issuer),
+      date: asString(o.date),
+    })
+  }
+  return entries
+}
+
+function parseReferences(raw: unknown): ReferenceEntry[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((item) => {
+    const o = isObj(item) ? item : {}
+    const id = asString(o.id).trim()
+    return {
+      id: id || createId('ref'),
+      name: asString(o.name),
+      title: asString(o.title),
+      company: asString(o.company),
+      relationship: asString(o.relationship),
+      phone: asString(o.phone),
+      email: asString(o.email),
+    }
+  })
+}
+
 function parseSectionOrder(raw: unknown): SectionId[] {
   const seen = new Set<SectionId>()
   const order: SectionId[] = []
@@ -147,7 +196,9 @@ export function parseResumeData(raw: unknown): ResumeData {
     experience: parseExperience(o.experience),
     education: parseEducation(o.education),
     skills: parseLines(o.skills),
-    certifications: parseLines(o.certifications),
+    certifications: parseCertifications(o.certifications),
+    references: parseReferences(o.references),
+    referencesOnRequest: o.referencesOnRequest === true,
     sectionOrder: parseSectionOrder(o.sectionOrder),
     hiddenSections: parseHiddenSections(o.hiddenSections),
   }
@@ -181,7 +232,7 @@ export function serializeResumeFile(
   resume: ResumeData,
   style: ResumeStyle,
   name: string,
-): ResumeExportV1 {
+): ResumeExport {
   return {
     version: RESUME_FILE_VERSION,
     kind: RESUME_FILE_KIND,
@@ -207,7 +258,7 @@ export function parseResumeFile(raw: unknown): ImportedResume {
   if (raw.kind !== RESUME_FILE_KIND) {
     throw new ResumeFileError('This JSON is not a resume-builder export.')
   }
-  if (raw.version !== RESUME_FILE_VERSION) {
+  if (!SUPPORTED_FILE_VERSIONS.has(raw.version as number)) {
     throw new ResumeFileError('This export version is not supported.')
   }
   if (!isObj(raw.resume)) {

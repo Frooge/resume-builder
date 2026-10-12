@@ -13,6 +13,7 @@ import { CertificationsEditor } from './sections/CertificationsEditor'
 import { ContactEditor } from './sections/ContactEditor'
 import { EducationEditor } from './sections/EducationEditor'
 import { ExperienceEditor } from './sections/ExperienceEditor'
+import { ReferencesEditor } from './sections/ReferencesEditor'
 import { SkillsEditor } from './sections/SkillsEditor'
 import { SummaryEditor } from './sections/SummaryEditor'
 
@@ -23,6 +24,7 @@ const SECTION_EDITORS: Record<SectionId, ComponentType> = {
   education: EducationEditor,
   skills: SkillsEditor,
   certifications: CertificationsEditor,
+  references: ReferencesEditor,
 }
 
 export function EditorPanel() {
