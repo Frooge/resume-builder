@@ -15,7 +15,9 @@ import type {
 } from '../../types/resume'
 import { SECTION_LABELS } from '../../types/resume'
 import { formatDateRange, formatYearRange } from '../../lib/formatDate'
+import { contactLinks, type ContactItemKey } from '../../lib/contactLinks'
 import { sortEducation, sortExperience } from '../../lib/sortEntries'
+import { isPinnedSection, visibleSectionOrder } from '../../lib/sectionOrder'
 import {
   PAGE_GAP_PX,
   PAGE_HEIGHT_PX,
@@ -44,6 +46,22 @@ type FlowUnit =
   | { key: string; sectionId: 'skills'; kind: 'skills-heading' }
   | { key: string; sectionId: 'skills'; kind: 'skills-line'; line: string }
   | { key: string; sectionId: 'skills'; kind: 'skills-empty' }
+  | {
+      key: string
+      sectionId: 'certifications'
+      kind: 'certifications-heading'
+    }
+  | {
+      key: string
+      sectionId: 'certifications'
+      kind: 'certifications-bullet'
+      line: string
+    }
+  | {
+      key: string
+      sectionId: 'certifications'
+      kind: 'certifications-empty'
+    }
   | {
       key: string
       sectionId: 'experience'
@@ -77,17 +95,6 @@ type FlowUnit =
       entry: EducationEntry
     }
   | { key: string; sectionId: 'education'; kind: 'education-empty' }
-
-function displayLinkedIn(value: string): string {
-  return value
-    .replace(/^https?:\/\//, '')
-    .replace(/^(www\.)?linkedin\.com\//, '')
-    .replace(/^in\//, 'in/')
-}
-
-function displayWebsite(value: string): string {
-  return value.replace(/^https?:\/\//, '').replace(/\/$/, '')
-}
 
 function IconPin() {
   return (
@@ -129,48 +136,52 @@ function IconGlobe() {
   )
 }
 
+const CONTACT_ICONS: Record<ContactItemKey, () => ReactNode> = {
+  location: IconPin,
+  email: IconMail,
+  phone: IconPhone,
+  linkedin: IconLinkedIn,
+  website: IconGlobe,
+}
+
 function ContactItem({
-  icon,
-  children,
+  itemKey,
+  text,
+  href,
 }: {
-  icon: ReactNode
-  children: string
+  itemKey: ContactItemKey
+  text: string
+  href?: string
 }) {
-  return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap">
-      <span className="text-zinc-600">{icon}</span>
-      <span>{children}</span>
-    </span>
+  const Icon = CONTACT_ICONS[itemKey]
+  const body = (
+    <>
+      <span className="text-zinc-600">
+        <Icon />
+      </span>
+      <span>{text}</span>
+    </>
+  )
+  const className = 'inline-flex items-center gap-1 whitespace-nowrap'
+
+  // Links keep the contact line's look: inherited colour, no underline
+  return href ? (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`${className} text-inherit no-underline`}
+    >
+      {body}
+    </a>
+  ) : (
+    <span className={className}>{body}</span>
   )
 }
 
 function ContactBlock({ resume }: { resume: ResumeData }) {
   const { contact } = resume
-  const items: { key: string; icon: ReactNode; text: string }[] = []
-
-  if (contact.location) {
-    items.push({ key: 'location', icon: <IconPin />, text: contact.location })
-  }
-  if (contact.email) {
-    items.push({ key: 'email', icon: <IconMail />, text: contact.email })
-  }
-  if (contact.phone) {
-    items.push({ key: 'phone', icon: <IconPhone />, text: contact.phone })
-  }
-  if (contact.linkedin) {
-    items.push({
-      key: 'linkedin',
-      icon: <IconLinkedIn />,
-      text: displayLinkedIn(contact.linkedin),
-    })
-  }
-  if (contact.website) {
-    items.push({
-      key: 'website',
-      icon: <IconGlobe />,
-      text: displayWebsite(contact.website),
-    })
-  }
+  const items = contactLinks(contact)
 
   return (
     <header className="border-b border-zinc-800 pb-3 text-center">
@@ -186,9 +197,12 @@ function ContactBlock({ resume }: { resume: ResumeData }) {
           style={{ fontSize: 'var(--fs-contact-meta)' }}
         >
           {items.map((item) => (
-            <ContactItem key={item.key} icon={item.icon}>
-              {item.text}
-            </ContactItem>
+            <ContactItem
+              key={item.key}
+              itemKey={item.key}
+              text={item.text}
+              href={item.href}
+            />
           ))}
         </p>
       ) : (
@@ -342,9 +356,7 @@ function EducationEntryBlock({ entry }: { entry: EducationEntry }) {
 }
 
 function buildFlowUnits(resume: ResumeData): FlowUnit[] {
-  const body = resume.sectionOrder.filter(
-    (id): id is Exclude<SectionId, 'contact'> => id !== 'contact',
-  )
+  const body = visibleSectionOrder(resume)
   const units: FlowUnit[] = [
     { key: 'contact', sectionId: 'contact', kind: 'contact' },
   ]
@@ -373,6 +385,31 @@ function buildFlowUnits(resume: ResumeData): FlowUnit[] {
             key: `skills-line-${i}`,
             sectionId: 'skills',
             kind: 'skills-line',
+            line,
+          })
+        })
+      }
+      continue
+    }
+    if (id === 'certifications') {
+      units.push({
+        key: 'certifications-heading',
+        sectionId: 'certifications',
+        kind: 'certifications-heading',
+      })
+      const lines = resume.certifications.map((s) => s.trim()).filter(Boolean)
+      if (lines.length === 0) {
+        units.push({
+          key: 'certifications-empty',
+          sectionId: 'certifications',
+          kind: 'certifications-empty',
+        })
+      } else {
+        lines.forEach((line, i) => {
+          units.push({
+            key: `certifications-bullet-${i}`,
+            sectionId: 'certifications',
+            kind: 'certifications-bullet',
             line,
           })
         })
@@ -448,7 +485,12 @@ function buildFlowUnits(resume: ResumeData): FlowUnit[] {
 function gapBefore(unit: FlowUnit, page: FlowUnit[]): number {
   if (page.length === 0) return 0
 
-  if (unit.kind === 'experience-bullet') return BULLET_GAP_PX
+  if (
+    unit.kind === 'experience-bullet' ||
+    unit.kind === 'certifications-bullet'
+  ) {
+    return BULLET_GAP_PX
+  }
   if (unit.kind === 'skills-line') return SKILL_GAP_PX
 
   if (
@@ -481,7 +523,7 @@ function packUnits(
   const heightOf = (key: string) => Math.ceil(heights[key] ?? 0)
 
   const pushContinuedHeading = (
-    kind: 'experience' | 'education' | 'skills',
+    kind: 'experience' | 'education' | 'skills' | 'certifications',
   ) => {
     if (kind === 'experience') {
       const cont: FlowUnit = {
@@ -501,6 +543,14 @@ function packUnits(
       }
       current.push(cont)
       used += heightOf('education-heading')
+    } else if (kind === 'certifications') {
+      const cont: FlowUnit = {
+        key: `certifications-heading-cont-${pages.length}`,
+        sectionId: 'certifications',
+        kind: 'certifications-heading',
+      }
+      current.push(cont)
+      used += heightOf('certifications-heading')
     } else {
       const cont: FlowUnit = {
         key: `skills-heading-cont-${pages.length}`,
@@ -542,6 +592,8 @@ function packUnits(
       pushContinuedHeading('education')
     } else if (unit.kind === 'skills-line') {
       pushContinuedHeading('skills')
+    } else if (unit.kind === 'certifications-bullet') {
+      pushContinuedHeading('certifications')
     }
   }
 
@@ -639,6 +691,19 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
           style={{ fontSize: 'var(--fs-muted)' }}
         >
           No skills yet.
+        </p>
+      )
+    case 'certifications-heading':
+      return <SectionHeading>{SECTION_LABELS.certifications}</SectionHeading>
+    case 'certifications-bullet':
+      return <ExperienceBullet bullet={unit.line} />
+    case 'certifications-empty':
+      return (
+        <p
+          className="italic text-zinc-400"
+          style={{ fontSize: 'var(--fs-muted)' }}
+        >
+          No certifications yet.
         </p>
       )
     case 'experience-heading':
@@ -793,7 +858,7 @@ export function ResumeDocument({
                     <SectionChrome
                       key={`${pageIndex}-${sectionId}-${groupIndex}`}
                       id={sectionId}
-                      disableDrag={sectionId === 'contact'}
+                      disableDrag={isPinnedSection(sectionId)}
                       onEdit={() => onEditSection(sectionId)}
                     >
                       {body}

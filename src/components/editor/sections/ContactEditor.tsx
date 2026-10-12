@@ -1,4 +1,5 @@
 import { useResumeStore } from '../../../store/resumeStore'
+import { displayLinkedIn, displayWebsite } from '../../../lib/contactLinks'
 import { Field } from '../fields'
 
 export function ContactEditor() {
@@ -35,16 +36,34 @@ export function ContactEditor() {
         value={contact.location}
         onChange={(location) => setContact({ location })}
       />
-      <Field
-        label="Website"
-        value={contact.website}
-        onChange={(website) => setContact({ website })}
-      />
-      <Field
-        label="LinkedIn"
-        value={contact.linkedin}
-        onChange={(linkedin) => setContact({ linkedin })}
-      />
+      <div className="grid grid-cols-2 gap-2">
+        <Field
+          label="LinkedIn URL"
+          value={contact.linkedin}
+          onChange={(linkedin) => setContact({ linkedin })}
+          placeholder="linkedin.com/in/you"
+        />
+        <Field
+          label="Display text"
+          value={contact.linkedinLabel}
+          onChange={(linkedinLabel) => setContact({ linkedinLabel })}
+          placeholder={displayLinkedIn(contact.linkedin) || 'in/you'}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Field
+          label="Website URL"
+          value={contact.website}
+          onChange={(website) => setContact({ website })}
+          placeholder="yoursite.dev"
+        />
+        <Field
+          label="Display text"
+          value={contact.websiteLabel}
+          onChange={(websiteLabel) => setContact({ websiteLabel })}
+          placeholder={displayWebsite(contact.website) || 'yoursite.dev'}
+        />
+      </div>
     </div>
   )
 }

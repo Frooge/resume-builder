@@ -10,6 +10,7 @@ import type {
 } from '../types/resume'
 import { DEFAULT_SECTION_ORDER } from '../types/resume'
 import { createId } from './sampleResume'
+import { withPinnedFirst } from './sectionOrder'
 import { DEFAULT_RESUME_STYLE, normalizeResumeStyle } from './typography'
 
 export const RESUME_FILE_KIND = 'resume-builder'
@@ -64,7 +65,9 @@ function parseContact(raw: unknown): Contact {
     phone: asString(o.phone),
     location: asString(o.location),
     website: asString(o.website),
+    websiteLabel: asString(o.websiteLabel),
     linkedin: asString(o.linkedin),
+    linkedinLabel: asString(o.linkedinLabel),
   }
 }
 
@@ -117,7 +120,37 @@ function parseSectionOrder(raw: unknown): SectionId[] {
   for (const id of DEFAULT_SECTION_ORDER) {
     if (!seen.has(id)) order.push(id)
   }
-  return order
+  return withPinnedFirst(order)
+}
+
+function parseLines(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.map(asString) : []
+}
+
+function parseHiddenSections(raw: unknown): SectionId[] {
+  if (!Array.isArray(raw)) return []
+  const hidden = new Set<SectionId>()
+  for (const id of raw) {
+    if (SECTION_IDS.has(id as SectionId) && id !== 'contact') {
+      hidden.add(id as SectionId)
+    }
+  }
+  return [...hidden]
+}
+
+/** Validate resume data field by field, defaulting anything missing. */
+export function parseResumeData(raw: unknown): ResumeData {
+  const o = isObj(raw) ? raw : {}
+  return {
+    contact: parseContact(o.contact),
+    summary: asString(o.summary),
+    experience: parseExperience(o.experience),
+    education: parseEducation(o.education),
+    skills: parseLines(o.skills),
+    certifications: parseLines(o.certifications),
+    sectionOrder: parseSectionOrder(o.sectionOrder),
+    hiddenSections: parseHiddenSections(o.hiddenSections),
+  }
 }
 
 function parseStyle(raw: unknown): ResumeStyle {
@@ -181,16 +214,7 @@ export function parseResumeFile(raw: unknown): ImportedResume {
     throw new ResumeFileError('This export is missing resume data.')
   }
 
-  const resume: ResumeData = {
-    contact: parseContact(raw.resume.contact),
-    summary: asString(raw.resume.summary),
-    experience: parseExperience(raw.resume.experience),
-    education: parseEducation(raw.resume.education),
-    skills: Array.isArray(raw.resume.skills)
-      ? raw.resume.skills.map(asString)
-      : [],
-    sectionOrder: parseSectionOrder(raw.resume.sectionOrder),
-  }
+  const resume = parseResumeData(raw.resume)
 
   const name =
     asString(raw.name).trim() || resume.contact.fullName.trim() || 'Untitled resume'

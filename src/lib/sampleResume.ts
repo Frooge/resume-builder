@@ -9,7 +9,9 @@ export const sampleResume: ResumeData = {
     phone: '(555) 123-4567',
     location: 'San Francisco, CA',
     website: 'alexrivera.dev',
+    websiteLabel: 'alexrivera.dev',
     linkedin: 'linkedin.com/in/alexrivera',
+    linkedinLabel: 'in/alexrivera',
   },
   summary:
     'Software engineer with 5+ years building reliable web products. Focused on clear architecture, thoughtful UX, and shipping iteratively with strong collaboration across product and design.',
@@ -58,7 +60,12 @@ export const sampleResume: ResumeData = {
     'Backend: Node.js, PostgreSQL, REST APIs',
     'Other: System Design, Technical Writing',
   ],
+  certifications: [
+    'AWS Certified Solutions Architect – Associate (2023)',
+    'Google Professional Cloud Developer (2021)',
+  ],
   sectionOrder: [...DEFAULT_SECTION_ORDER],
+  hiddenSections: [],
 }
 
 export function createEmptyResume(): ResumeData {
@@ -70,13 +77,17 @@ export function createEmptyResume(): ResumeData {
       phone: '',
       location: '',
       website: '',
+      websiteLabel: '',
       linkedin: '',
+      linkedinLabel: '',
     },
     summary: '',
     experience: [],
     education: [],
     skills: [],
+    certifications: [],
     sectionOrder: [...DEFAULT_SECTION_ORDER],
+    hiddenSections: [],
   }
 }
 

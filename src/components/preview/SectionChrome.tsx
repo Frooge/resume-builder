@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { SectionId } from '../../types/resume'
+import { GripIcon } from '../icons'
 
 interface SectionChromeProps {
   id: SectionId
@@ -68,19 +69,6 @@ export function SectionChrome({
       </div>
       {children}
     </div>
-  )
-}
-
-function GripIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-      <circle cx="5" cy="3.5" r="1.1" />
-      <circle cx="9" cy="3.5" r="1.1" />
-      <circle cx="5" cy="7" r="1.1" />
-      <circle cx="9" cy="7" r="1.1" />
-      <circle cx="5" cy="10.5" r="1.1" />
-      <circle cx="9" cy="10.5" r="1.1" />
-    </svg>
   )
 }
 

@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { parseResumeData } from '../lib/resumeFile'
 import { createEmptyResume, createId, sampleResume } from '../lib/sampleResume'
+import { moveSection as moveSectionInOrder } from '../lib/sectionOrder'
 import { DEFAULT_RESUME_STYLE, normalizeResumeStyle } from '../lib/typography'
 import type {
   Contact,
@@ -27,6 +29,7 @@ interface ResumeStore {
   setContact: (contact: Partial<Contact>) => void
   setSummary: (summary: string) => void
   setSkills: (skills: string[]) => void
+  setCertifications: (certifications: string[]) => void
   setStyle: (patch: Partial<Omit<ResumeStyle, 'margins'>> & {
     margins?: Partial<PageMargins>
   }) => void
@@ -36,8 +39,9 @@ interface ResumeStore {
   addEducation: () => void
   updateEducation: (id: string, patch: Partial<EducationEntry>) => void
   removeEducation: (id: string) => void
-  reorderSections: (order: SectionId[]) => void
+  moveSection: (activeId: SectionId, overId: SectionId) => void
   toggleSection: (id: SectionId) => void
+  toggleSectionHidden: (id: SectionId) => void
   openSection: (id: SectionId) => void
   requestFocusSection: (id: SectionId) => void
   clearFocusSectionRequest: () => void
@@ -108,6 +112,11 @@ export const useResumeStore = create<ResumeStore>()(
           resume: { ...state.resume, skills },
         })),
 
+      setCertifications: (certifications) =>
+        set((state) => ({
+          resume: { ...state.resume, certifications },
+        })),
+
       setStyle: (patch) =>
         set((state) => ({
           style: normalizeResumeStyle({
@@ -172,9 +181,16 @@ export const useResumeStore = create<ResumeStore>()(
           },
         })),
 
-      reorderSections: (order) =>
+      moveSection: (activeId, overId) =>
         set((state) => ({
-          resume: { ...state.resume, sectionOrder: order },
+          resume: {
+            ...state.resume,
+            sectionOrder: moveSectionInOrder(
+              state.resume.sectionOrder,
+              activeId,
+              overId,
+            ),
+          },
         })),
 
       toggleSection: (id) =>
@@ -186,6 +202,20 @@ export const useResumeStore = create<ResumeStore>()(
               openSections: open
                 ? state.ui.openSections.filter((s) => s !== id)
                 : [...state.ui.openSections, id],
+            },
+          }
+        }),
+
+      toggleSectionHidden: (id) =>
+        set((state) => {
+          if (id === 'contact') return {}
+          const hidden = state.resume.hiddenSections.includes(id)
+          return {
+            resume: {
+              ...state.resume,
+              hiddenSections: hidden
+                ? state.resume.hiddenSections.filter((s) => s !== id)
+                : [...state.resume.hiddenSections, id],
             },
           }
         }),
@@ -349,9 +379,11 @@ export const useResumeStore = create<ResumeStore>()(
         return {
           ...current,
           ...p,
+          resume: p.resume ? parseResumeData(p.resume) : current.resume,
           style: normalizeResumeStyle(p.style),
           savedResumes: (p.savedResumes ?? current.savedResumes).map((s) => ({
             ...s,
+            resume: parseResumeData(s.resume),
             style: normalizeResumeStyle(s.style),
           })),
         }

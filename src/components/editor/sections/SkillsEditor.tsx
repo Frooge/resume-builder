@@ -9,7 +9,7 @@ export function SkillsEditor() {
     <TextArea
       label="Skills (one category per line)"
       value={skills.join('\n')}
-      onChange={(value) => setSkills(value.split('\n').map((s) => s.trimEnd()))}
+      onChange={(value) => setSkills(value.split('\n'))}
       placeholder={'Frontend: TypeScript, React\nBackend: Node.js, PostgreSQL'}
       rows={6}
     />

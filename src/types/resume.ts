@@ -4,6 +4,7 @@ export type SectionId =
   | 'experience'
   | 'education'
   | 'skills'
+  | 'certifications'
 
 export interface Contact {
   fullName: string
@@ -11,8 +12,12 @@ export interface Contact {
   email: string
   phone: string
   location: string
+  /** URL; `websiteLabel` is the text shown (falls back to a tidied URL). */
   website: string
+  websiteLabel: string
+  /** URL or handle; `linkedinLabel` is the text shown. */
   linkedin: string
+  linkedinLabel: string
 }
 
 export interface ExperienceEntry {
@@ -64,7 +69,9 @@ export interface ResumeData {
   experience: ExperienceEntry[]
   education: EducationEntry[]
   skills: string[]
+  certifications: string[]
   sectionOrder: SectionId[]
+  hiddenSections: SectionId[]
 }
 
 export interface SavedResume {
@@ -81,6 +88,7 @@ export const DEFAULT_SECTION_ORDER: SectionId[] = [
   'experience',
   'education',
   'skills',
+  'certifications',
 ]
 
 export const SECTION_LABELS: Record<SectionId, string> = {
@@ -89,4 +97,5 @@ export const SECTION_LABELS: Record<SectionId, string> = {
   experience: 'Experience',
   education: 'Education',
   skills: 'Skills',
+  certifications: 'Certifications',
 }

@@ -1,8 +1,11 @@
 import { jsPDF } from 'jspdf'
 import type { ResumeData, ResumeStyle, SectionId } from '../types/resume'
 import { SECTION_LABELS } from '../types/resume'
+import { contactLinks, type ContactItem } from './contactLinks'
 import { formatDateRange, formatYearRange } from './formatDate'
+import { toWinAnsi } from './pdfText'
 import { sortEducation, sortExperience } from './sortEntries'
+import { visibleSectionOrder } from './sectionOrder'
 import {
   DEFAULT_RESUME_STYLE,
   getFontPdf,
@@ -30,16 +33,6 @@ function slugify(name: string): string {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '') || 'resume'
   )
-}
-
-function displayLinkedIn(value: string): string {
-  return value
-    .replace(/^https?:\/\//, '')
-    .replace(/^(www\.)?linkedin\.com\//, '')
-}
-
-function displayWebsite(value: string): string {
-  return value.replace(/^https?:\/\//, '').replace(/\/$/, '')
 }
 
 function pxToMm(px: number): number {
@@ -129,7 +122,7 @@ function drawRule(w: PdfWriter) {
 }
 
 function wrap(w: PdfWriter, text: string, maxWidth = w.width): string[] {
-  return w.doc.splitTextToSize(text, maxWidth)
+  return w.doc.splitTextToSize(toWinAnsi(text), maxWidth)
 }
 
 function writeLines(
@@ -153,7 +146,7 @@ function writeLines(
 
   for (const line of lines) {
     ensureSpace(w, lh)
-    w.doc.text(line, x, w.y + ascent * 0.85, {
+    w.doc.text(toWinAnsi(line), x, w.y + ascent * 0.85, {
       align: opts.align ?? 'left',
     })
     w.y += lh
@@ -169,6 +162,24 @@ function writeWrapped(
   const { maxWidth, ...lineOpts } = opts
   setStyle(w, lineOpts)
   writeLines(w, wrap(w, text, maxWidth ?? w.width), lineOpts)
+}
+
+function writeBullet(w: PdfWriter, text: string) {
+  const indent = pxToMm(14)
+  setStyle(w, { size: w.sizes.body, color: [63, 63, 70] })
+  const marker = '• '
+  const markerWidth = w.doc.getTextWidth(marker)
+  const lines = wrap(w, text, w.width - indent - markerWidth)
+  const lh = lineHeightMm(w.sizes.body, 1.4)
+  const ascent = pxToMm(w.sizes.body)
+
+  lines.forEach((line, i) => {
+    ensureSpace(w, lh)
+    const baseline = w.y + ascent * 0.85
+    if (i === 0) w.doc.text(marker, w.left + indent, baseline)
+    w.doc.text(line, w.left + indent + markerWidth, baseline)
+    w.y += lh
+  })
 }
 
 function heading(w: PdfWriter, text: string) {
@@ -194,26 +205,81 @@ function buildContact(w: PdfWriter, resume: ResumeData) {
     leading: 1.15,
   })
 
-  const parts = [
-    contact.location,
-    contact.email,
-    contact.phone,
-    contact.linkedin ? displayLinkedIn(contact.linkedin) : '',
-    contact.website ? displayWebsite(contact.website) : '',
-  ].filter(Boolean)
-
-  if (parts.length > 0) {
+  const items = contactLinks(contact)
+  if (items.length > 0) {
     w.y += pxToMm(4)
-    writeWrapped(w, parts.join('  |  '), {
-      size: w.sizes.contactMeta,
-      color: [82, 82, 91],
-      align: 'center',
-      leading: 1.4,
-    })
+    writeContactLine(w, items)
   }
 
   w.y += pxToMm(8)
   drawRule(w)
+}
+
+type ContactSegment = { text: string; href?: string; width: number }
+
+/**
+ * Lays the contact line out segment by segment (not as one joined string) so
+ * each link gets its own clickable area. Wraps between items, centred like
+ * writeLines; an item wider than the line wraps on its own.
+ */
+function writeContactLine(w: PdfWriter, items: ContactItem[]) {
+  const size = w.sizes.contactMeta
+  setStyle(w, { size, color: [82, 82, 91] })
+  const sep = '  |  '
+  const sepWidth = w.doc.getTextWidth(sep)
+  const measure = (text: string, href?: string): ContactSegment => ({
+    text,
+    href,
+    width: w.doc.getTextWidth(text),
+  })
+
+  const lines: ContactSegment[][] = []
+  let current: ContactSegment[] = []
+  let currentWidth = 0
+  const flush = () => {
+    if (current.length > 0) lines.push(current)
+    current = []
+    currentWidth = 0
+  }
+
+  for (const item of items) {
+    const seg = measure(toWinAnsi(item.text), item.href)
+    if (seg.width > w.width) {
+      flush()
+      for (const piece of wrap(w, seg.text)) lines.push([measure(piece, seg.href)])
+      continue
+    }
+    const added = (current.length > 0 ? sepWidth : 0) + seg.width
+    if (current.length > 0 && currentWidth + added > w.width) {
+      flush()
+      current.push(seg)
+      currentWidth = seg.width
+    } else {
+      current.push(seg)
+      currentWidth += added
+    }
+  }
+  flush()
+
+  const lh = lineHeightMm(size, 1.4)
+  const ascent = pxToMm(size)
+  for (const line of lines) {
+    ensureSpace(w, lh)
+    const lineWidth =
+      line.reduce((sum, seg) => sum + seg.width, 0) + sepWidth * (line.length - 1)
+    const baseline = w.y + ascent * 0.85
+    let x = PAGE_WIDTH_MM / 2 - lineWidth / 2
+    line.forEach((seg, i) => {
+      if (i > 0) {
+        w.doc.text(sep, x, baseline)
+        x += sepWidth
+      }
+      w.doc.text(seg.text, x, baseline)
+      if (seg.href) w.doc.link(x, w.y, seg.width, lh, { url: seg.href })
+      x += seg.width
+    })
+    w.y += lh
+  }
 }
 
 function buildSummary(w: PdfWriter, resume: ResumeData) {
@@ -281,21 +347,7 @@ function buildExperience(w: PdfWriter, resume: ResumeData) {
 
     for (const bullet of entry.bullets.map((b) => b.trim()).filter(Boolean)) {
       w.y += TIGHT_GAP_MM
-      const indent = pxToMm(14)
-      setStyle(w, { size: w.sizes.body, color: [63, 63, 70] })
-      const marker = '• '
-      const markerWidth = w.doc.getTextWidth(marker)
-      const lines = wrap(w, bullet, w.width - indent - markerWidth)
-      const lh = lineHeightMm(w.sizes.body, 1.4)
-      const ascent = pxToMm(w.sizes.body)
-
-      lines.forEach((line, i) => {
-        ensureSpace(w, lh)
-        const baseline = w.y + ascent * 0.85
-        if (i === 0) w.doc.text(marker, w.left + indent, baseline)
-        w.doc.text(line, w.left + indent + markerWidth, baseline)
-        w.y += lh
-      })
+      writeBullet(w, bullet)
     }
   }
 }
@@ -345,6 +397,16 @@ function buildSkills(w: PdfWriter, resume: ResumeData) {
   }
 }
 
+function buildCertifications(w: PdfWriter, resume: ResumeData) {
+  const lines = resume.certifications.map((s) => s.trim()).filter(Boolean)
+  if (lines.length === 0) return
+  heading(w, SECTION_LABELS.certifications)
+  for (const line of lines) {
+    w.y += TIGHT_GAP_MM
+    writeBullet(w, line)
+  }
+}
+
 const BUILDERS: Record<
   Exclude<SectionId, 'contact'>,
   (w: PdfWriter, resume: ResumeData) => void
@@ -353,6 +415,7 @@ const BUILDERS: Record<
   experience: buildExperience,
   education: buildEducation,
   skills: buildSkills,
+  certifications: buildCertifications,
 }
 
 export function buildResumePdf(
@@ -361,8 +424,7 @@ export function buildResumePdf(
 ): jsPDF {
   const w = createWriter(style)
   buildContact(w, resume)
-  for (const id of resume.sectionOrder) {
-    if (id === 'contact') continue
+  for (const id of visibleSectionOrder(resume)) {
     BUILDERS[id](w, resume)
   }
   return w.doc
