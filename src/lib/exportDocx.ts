@@ -5,12 +5,15 @@ import {
   TextRun,
   AlignmentType,
   BorderStyle,
+  ExternalHyperlink,
 } from 'docx'
 import { saveAs } from 'file-saver'
 import type { ResumeData, ResumeStyle, SectionId } from '../types/resume'
 import { SECTION_LABELS } from '../types/resume'
+import { contactLinks } from './contactLinks'
 import { formatDateRange, formatYearRange } from './formatDate'
 import { sortEducation, sortExperience } from './sortEntries'
+import { visibleSectionOrder } from './sectionOrder'
 import { pxToTwip } from './pageSize'
 import {
   DEFAULT_RESUME_STYLE,
@@ -27,16 +30,6 @@ function slugify(name: string): string {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '') || 'resume'
   )
-}
-
-function displayLinkedIn(value: string): string {
-  return value
-    .replace(/^https?:\/\//, '')
-    .replace(/^(www\.)?linkedin\.com\//, '')
-}
-
-function displayWebsite(value: string): string {
-  return value.replace(/^https?:\/\//, '').replace(/\/$/, '')
 }
 
 type DocxCtx = {
@@ -124,26 +117,21 @@ function buildContact(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
     }),
   ]
 
-  const parts = [
-    contact.location,
-    contact.email,
-    contact.phone,
-    contact.linkedin ? displayLinkedIn(contact.linkedin) : '',
-    contact.website ? displayWebsite(contact.website) : '',
-  ].filter(Boolean)
-
-  if (parts.length > 0) {
+  const items = contactLinks(contact)
+  if (items.length > 0) {
+    const run = (text: string) =>
+      new TextRun({ text, size: ctx.sizes.contactMeta, font: ctx.font })
     paras.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
         spacing: { after: 120 },
-        children: [
-          new TextRun({
-            text: parts.join('  |  '),
-            size: ctx.sizes.contactMeta,
-            font: ctx.font,
-          }),
-        ],
+        // Links stay in the body text colour (no Hyperlink style) to match the preview
+        children: items.flatMap((item, i) => {
+          const node = item.href
+            ? new ExternalHyperlink({ link: item.href, children: [run(item.text)] })
+            : run(item.text)
+          return i === 0 ? [node] : [run('  |  '), node]
+        }),
       }),
     )
   }
@@ -237,6 +225,15 @@ function buildSkills(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
   ]
 }
 
+function buildCertifications(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
+  const lines = resume.certifications.map((s) => s.trim()).filter(Boolean)
+  if (lines.length === 0) return []
+  return [
+    heading(SECTION_LABELS.certifications, ctx),
+    ...lines.map((line) => bullet(line, ctx)),
+  ]
+}
+
 const BUILDERS: Record<
   Exclude<SectionId, 'contact'>,
   (resume: ResumeData, ctx: DocxCtx) => Paragraph[]
@@ -245,6 +242,7 @@ const BUILDERS: Record<
   experience: buildExperience,
   education: buildEducation,
   skills: buildSkills,
+  certifications: buildCertifications,
 }
 
 export async function exportDocx(
@@ -258,8 +256,7 @@ export async function exportDocx(
   }
   const children: Paragraph[] = [...buildContact(resume, ctx)]
 
-  for (const id of resume.sectionOrder) {
-    if (id === 'contact') continue
+  for (const id of visibleSectionOrder(resume)) {
     children.push(...BUILDERS[id](resume, ctx))
   }
 
