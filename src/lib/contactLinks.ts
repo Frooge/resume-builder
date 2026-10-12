@@ -1,4 +1,4 @@
-import type { Contact } from '../types/resume'
+import type { Contact, ReferenceEntry } from '../types/resume'
 
 export type ContactItemKey = 'location' | 'email' | 'phone' | 'linkedin' | 'website'
 
@@ -74,4 +74,26 @@ export function contactLinks(contact: Contact): ContactItem[] {
     })
   }
   return items
+}
+
+export interface ReferenceContactItem {
+  text: string
+  href?: string
+}
+
+/** A reference's phone and email, in display order; the email links via mailto. */
+export function referenceContactItems(
+  ref: ReferenceEntry,
+): ReferenceContactItem[] {
+  const items: ReferenceContactItem[] = []
+  if (ref.phone.trim()) items.push({ text: ref.phone.trim() })
+  if (ref.email.trim()) {
+    items.push({ text: ref.email.trim(), href: mailtoHref(ref.email) })
+  }
+  return items
+}
+
+/** "Job title, Company" for a reference, skipping empty parts. */
+export function referenceRole(ref: ReferenceEntry): string {
+  return [ref.title.trim(), ref.company.trim()].filter(Boolean).join(', ')
 }

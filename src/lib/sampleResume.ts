@@ -61,9 +61,40 @@ export const sampleResume: ResumeData = {
     'Other: System Design, Technical Writing',
   ],
   certifications: [
-    'AWS Certified Solutions Architect – Associate (2023)',
-    'Google Professional Cloud Developer (2021)',
+    {
+      id: 'cert-1',
+      name: 'AWS Certified Solutions Architect – Associate',
+      issuer: 'Amazon Web Services',
+      date: '2023-04',
+    },
+    {
+      id: 'cert-2',
+      name: 'Google Professional Cloud Developer',
+      issuer: 'Google Cloud',
+      date: '2021-09',
+    },
   ],
+  references: [
+    {
+      id: 'ref-1',
+      name: 'Jordan Lee',
+      title: 'Engineering Manager',
+      company: 'Northstar Labs',
+      relationship: 'Direct manager, 2022 – present',
+      phone: '(555) 987-6543',
+      email: 'jordan.lee@example.com',
+    },
+    {
+      id: 'ref-2',
+      name: 'Priya Shah',
+      title: 'Staff Engineer',
+      company: 'Brightline',
+      relationship: 'Team lead, 2019 – 2022',
+      phone: '(555) 246-8101',
+      email: 'priya.shah@example.com',
+    },
+  ],
+  referencesOnRequest: false,
   sectionOrder: [...DEFAULT_SECTION_ORDER],
   hiddenSections: [],
 }
@@ -86,6 +117,8 @@ export function createEmptyResume(): ResumeData {
     education: [],
     skills: [],
     certifications: [],
+    references: [],
+    referencesOnRequest: false,
     sectionOrder: [...DEFAULT_SECTION_ORDER],
     hiddenSections: [],
   }

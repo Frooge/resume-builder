@@ -9,10 +9,14 @@ import {
 } from 'docx'
 import { saveAs } from 'file-saver'
 import type { ResumeData, ResumeStyle, SectionId } from '../types/resume'
-import { SECTION_LABELS } from '../types/resume'
-import { contactLinks } from './contactLinks'
-import { formatDateRange, formatYearRange } from './formatDate'
-import { sortEducation, sortExperience } from './sortEntries'
+import { REFERENCES_ON_REQUEST_TEXT, SECTION_LABELS } from '../types/resume'
+import {
+  contactLinks,
+  referenceContactItems,
+  referenceRole,
+} from './contactLinks'
+import { formatDateRange, formatMonthYear, formatYearRange } from './formatDate'
+import { sortCertifications, sortEducation, sortExperience } from './sortEntries'
 import { visibleSectionOrder } from './sectionOrder'
 import { pxToTwip } from './pageSize'
 import {
@@ -226,12 +230,97 @@ function buildSkills(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
 }
 
 function buildCertifications(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
-  const lines = resume.certifications.map((s) => s.trim()).filter(Boolean)
-  if (lines.length === 0) return []
-  return [
-    heading(SECTION_LABELS.certifications, ctx),
-    ...lines.map((line) => bullet(line, ctx)),
-  ]
+  if (resume.certifications.length === 0) return []
+  const paras: Paragraph[] = [heading(SECTION_LABELS.certifications, ctx)]
+
+  for (const entry of sortCertifications(resume.certifications)) {
+    const date = formatMonthYear(entry.date)
+    paras.push(
+      new Paragraph({
+        spacing: { before: 60, after: 0 },
+        children: [
+          new TextRun({
+            text: entry.name || 'Certification',
+            bold: true,
+            size: ctx.sizes.body,
+            font: ctx.font,
+          }),
+          ...(date
+            ? [
+                new TextRun({
+                  text: `\t${date}`,
+                  size: ctx.sizes.dates,
+                  font: ctx.font,
+                  color: '666666',
+                }),
+              ]
+            : []),
+        ],
+      }),
+    )
+    if (entry.issuer.trim()) paras.push(body(entry.issuer, ctx))
+  }
+
+  return paras
+}
+
+function buildReferences(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
+  if (resume.referencesOnRequest) {
+    return [
+      heading(SECTION_LABELS.references, ctx),
+      body(REFERENCES_ON_REQUEST_TEXT, ctx),
+    ]
+  }
+  if (resume.references.length === 0) return []
+  const paras: Paragraph[] = [heading(SECTION_LABELS.references, ctx)]
+
+  for (const entry of resume.references) {
+    paras.push(
+      new Paragraph({
+        spacing: { before: 120, after: 20 },
+        keepNext: true,
+        children: [
+          new TextRun({
+            text: entry.name || 'Reference',
+            bold: true,
+            size: ctx.sizes.roleTitle,
+            font: ctx.font,
+          }),
+        ],
+      }),
+    )
+    const role = referenceRole(entry)
+    if (role) paras.push(body(role, ctx))
+    if (entry.relationship.trim()) {
+      paras.push(body(entry.relationship, ctx, { size: ctx.sizes.details }))
+    }
+    const contacts = referenceContactItems(entry)
+    if (contacts.length > 0) {
+      const run = (text: string) =>
+        new TextRun({
+          text,
+          size: ctx.sizes.dates,
+          font: ctx.font,
+          color: '666666',
+        })
+      paras.push(
+        new Paragraph({
+          spacing: { after: 60 },
+          children: contacts.flatMap((item, i) => {
+            const node = item.href
+              ? new ExternalHyperlink({
+                  link: item.href,
+                  children: [run(item.text)],
+                })
+              : run(item.text)
+            return i === 0 ? [node] : [run('  |  '), node]
+          }),
+        }),
+      )
+    }
+  }
+
+  return paras
 }
 
 const BUILDERS: Record<
@@ -243,6 +332,7 @@ const BUILDERS: Record<
   education: buildEducation,
   skills: buildSkills,
   certifications: buildCertifications,
+  references: buildReferences,
 }
 
 export async function exportDocx(

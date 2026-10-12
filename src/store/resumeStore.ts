@@ -5,10 +5,12 @@ import { createEmptyResume, createId, sampleResume } from '../lib/sampleResume'
 import { moveSection as moveSectionInOrder } from '../lib/sectionOrder'
 import { DEFAULT_RESUME_STYLE, normalizeResumeStyle } from '../lib/typography'
 import type {
+  CertificationEntry,
   Contact,
   EducationEntry,
   ExperienceEntry,
   PageMargins,
+  ReferenceEntry,
   ResumeData,
   ResumeStyle,
   SavedResume,
@@ -29,7 +31,6 @@ interface ResumeStore {
   setContact: (contact: Partial<Contact>) => void
   setSummary: (summary: string) => void
   setSkills: (skills: string[]) => void
-  setCertifications: (certifications: string[]) => void
   setStyle: (patch: Partial<Omit<ResumeStyle, 'margins'>> & {
     margins?: Partial<PageMargins>
   }) => void
@@ -39,6 +40,13 @@ interface ResumeStore {
   addEducation: () => void
   updateEducation: (id: string, patch: Partial<EducationEntry>) => void
   removeEducation: (id: string) => void
+  addCertification: () => void
+  updateCertification: (id: string, patch: Partial<CertificationEntry>) => void
+  removeCertification: (id: string) => void
+  addReference: () => void
+  updateReference: (id: string, patch: Partial<ReferenceEntry>) => void
+  removeReference: (id: string) => void
+  setReferencesOnRequest: (onRequest: boolean) => void
   moveSection: (activeId: SectionId, overId: SectionId) => void
   toggleSection: (id: SectionId) => void
   toggleSectionHidden: (id: SectionId) => void
@@ -76,6 +84,23 @@ const emptyEducation = (): EducationEntry => ({
   details: '',
 })
 
+const emptyCertification = (): CertificationEntry => ({
+  id: createId('cert'),
+  name: '',
+  issuer: '',
+  date: '',
+})
+
+const emptyReference = (): ReferenceEntry => ({
+  id: createId('ref'),
+  name: '',
+  title: '',
+  company: '',
+  relationship: '',
+  phone: '',
+  email: '',
+})
+
 function snapshotName(resume: ResumeData, fallback: string): string {
   const trimmed = fallback.trim()
   if (trimmed) return trimmed
@@ -110,11 +135,6 @@ export const useResumeStore = create<ResumeStore>()(
       setSkills: (skills) =>
         set((state) => ({
           resume: { ...state.resume, skills },
-        })),
-
-      setCertifications: (certifications) =>
-        set((state) => ({
-          resume: { ...state.resume, certifications },
         })),
 
       setStyle: (patch) =>
@@ -179,6 +199,68 @@ export const useResumeStore = create<ResumeStore>()(
             ...state.resume,
             education: state.resume.education.filter((e) => e.id !== id),
           },
+        })),
+
+      addCertification: () =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            certifications: [
+              ...state.resume.certifications,
+              emptyCertification(),
+            ],
+          },
+        })),
+
+      updateCertification: (id, patch) =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            certifications: state.resume.certifications.map((entry) =>
+              entry.id === id ? { ...entry, ...patch } : entry,
+            ),
+          },
+        })),
+
+      removeCertification: (id) =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            certifications: state.resume.certifications.filter(
+              (c) => c.id !== id,
+            ),
+          },
+        })),
+
+      addReference: () =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            references: [...state.resume.references, emptyReference()],
+          },
+        })),
+
+      updateReference: (id, patch) =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            references: state.resume.references.map((entry) =>
+              entry.id === id ? { ...entry, ...patch } : entry,
+            ),
+          },
+        })),
+
+      removeReference: (id) =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            references: state.resume.references.filter((r) => r.id !== id),
+          },
+        })),
+
+      setReferencesOnRequest: (referencesOnRequest) =>
+        set((state) => ({
+          resume: { ...state.resume, referencesOnRequest },
         })),
 
       moveSection: (activeId, overId) =>

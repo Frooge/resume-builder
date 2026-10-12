@@ -20,7 +20,7 @@ The same `ResumeData` is drawn by three independent renderers that must stay vis
 
 A layout or content change to any section means editing all three. The contact line's items, display text and link targets come from `contactLinks` (`src/lib/contactLinks.ts`), which only emits `http(s)`/`mailto:` hrefs; the PDF draws that line segment by segment so each link gets its own clickable area. Shared inputs keep them aligned: `src/lib/typography.ts` (font mapping per target; px sizes for preview/PDF, separate half-point sizes for DOCX), `src/lib/sortEntries.ts`, `src/lib/formatDate.ts`, and `SECTION_LABELS`. Each renderer converts from the CSS-px source of truth: PDF to mm, DOCX to twips (`pxToTwip`) and half-points.
 
-Experience and education are sorted at render time (current first, then newest dates); their stored array order is not display order. ## Section order
+Experience, education and certifications are sorted at render time by `src/lib/sortEntries.ts` (current first, then newest dates; undated certifications last); their stored array order is not display order. References keep their stored order, and when `referencesOnRequest` is on every renderer prints `REFERENCES_ON_REQUEST_TEXT` instead of the entries. A reference's phone/email line comes from `referenceContactItems` (`src/lib/contactLinks.ts`), so the email links the same way in all three renderers. ## Section order
 
 All ordering rules live in `src/lib/sectionOrder.ts`. Contact and Summary are pinned first (`PINNED_SECTIONS`); `parseSectionOrder` enforces this on imported and persisted data, and every reorder goes through the store's `moveSection`, which treats a drop onto a pinned section as "first movable slot". The editor renders its accordions in `resume.sectionOrder`, and both the editor and the preview can be dragged to reorder (separate `DndContext`s sharing sensors and pointer-based collision detection from `src/components/sectionDnd.ts`).
 
@@ -38,4 +38,4 @@ A new resume or style field touches, in order: `src/types/resume.ts`; `src/lib/s
 
 ## Import / export file format
 
-JSON exports are `{ kind: 'resume-builder', version: 1, name, exportedAt, resume, style }` (`src/lib/resumeFile.ts`). Changing the shape incompatibly means bumping `RESUME_FILE_VERSION` and keeping a parser for the old version. Import sources register in `src/lib/import/index.ts` as `ResumeImporter`s; the toolbar builds its import menu from that list.
+JSON exports are `{ kind: 'resume-builder', version: 2, name, exportedAt, resume, style }` (`src/lib/resumeFile.ts`). Changing the shape incompatibly means bumping `RESUME_FILE_VERSION` and keeping a parser for the old version. Version 1 files are still accepted: their certifications were plain strings, which `parseCertifications` turns into `{ name, issuer: '', date: '' }` entries. Import sources register in `src/lib/import/index.ts` as `ResumeImporter`s; the toolbar builds its import menu from that list.
