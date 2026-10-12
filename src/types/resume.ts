@@ -13,6 +13,8 @@ export interface Contact {
   location: string
   website: string
   linkedin: string
+  /** Square JPEG data URL, resized client-side. */
+  photo?: string
 }
 
 export interface ExperienceEntry {

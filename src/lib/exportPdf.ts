@@ -3,6 +3,7 @@ import type { ResumeData, ResumeStyle, SectionId } from '../types/resume'
 import { SECTION_LABELS } from '../types/resume'
 import { formatDateRange, formatYearRange } from './formatDate'
 import { sortEducation, sortExperience } from './sortEntries'
+import { PHOTO_DISPLAY_PX } from './photo'
 import {
   DEFAULT_RESUME_STYLE,
   getFontPdf,
@@ -143,13 +144,14 @@ function writeLines(
     align?: 'left' | 'center'
     leading?: number
     after?: number
+    x?: number
   },
 ) {
   if (lines.length === 0) return
   setStyle(w, opts)
   const lh = lineHeightMm(opts.size, opts.leading ?? 1.45)
   const ascent = pxToMm(opts.size)
-  const x = opts.align === 'center' ? PAGE_WIDTH_MM / 2 : w.left
+  const x = opts.x ?? (opts.align === 'center' ? PAGE_WIDTH_MM / 2 : w.left)
 
   for (const line of lines) {
     ensureSpace(w, lh)
@@ -184,8 +186,72 @@ function heading(w: PdfWriter, text: string) {
   w.y += HEADING_AFTER_MM - pxToMm(6)
 }
 
+function contactParts(resume: ResumeData): string[] {
+  const { contact } = resume
+  return [
+    contact.location,
+    contact.email,
+    contact.phone,
+    contact.linkedin ? displayLinkedIn(contact.linkedin) : '',
+    contact.website ? displayWebsite(contact.website) : '',
+  ].filter(Boolean)
+}
+
+/** Name and contact on the left, square photo on the right edge. */
+function buildContactWithPhoto(
+  w: PdfWriter,
+  resume: ResumeData,
+  photo: string,
+) {
+  const top = w.y
+  const photoMm = pxToMm(PHOTO_DISPLAY_PX)
+  const textWidth = w.width - photoMm - pxToMm(16)
+  const name = (resume.contact.fullName || 'Your Name').toUpperCase()
+  const parts = contactParts(resume)
+
+  const nameOpts = {
+    size: w.sizes.name,
+    bold: true,
+    color: [24, 24, 27] as [number, number, number],
+    leading: 1.15,
+  }
+  const metaOpts = {
+    size: w.sizes.contactMeta,
+    color: [82, 82, 91] as [number, number, number],
+    leading: 1.4,
+  }
+
+  setStyle(w, nameOpts)
+  const nameLines = wrap(w, name, textWidth)
+  setStyle(w, metaOpts)
+  const metaLines = parts.length > 0 ? wrap(w, parts.join('  |  '), textWidth) : []
+
+  const textHeight =
+    nameLines.length * lineHeightMm(nameOpts.size, nameOpts.leading) +
+    (metaLines.length > 0
+      ? pxToMm(4) + metaLines.length * lineHeightMm(metaOpts.size, metaOpts.leading)
+      : 0)
+
+  w.y = top + Math.max(0, (photoMm - textHeight) / 2)
+  writeLines(w, nameLines, nameOpts)
+  if (metaLines.length > 0) {
+    w.y += pxToMm(4)
+    writeLines(w, metaLines, metaOpts)
+  }
+
+  w.doc.addImage(photo, 'JPEG', w.right - photoMm, top, photoMm, photoMm)
+  w.y = Math.max(w.y, top + photoMm)
+
+  w.y += pxToMm(8)
+  drawRule(w)
+}
+
 function buildContact(w: PdfWriter, resume: ResumeData) {
   const { contact } = resume
+  if (contact.photo) {
+    buildContactWithPhoto(w, resume, contact.photo)
+    return
+  }
   writeLines(w, [(contact.fullName || 'Your Name').toUpperCase()], {
     size: w.sizes.name,
     bold: true,
@@ -194,13 +260,7 @@ function buildContact(w: PdfWriter, resume: ResumeData) {
     leading: 1.15,
   })
 
-  const parts = [
-    contact.location,
-    contact.email,
-    contact.phone,
-    contact.linkedin ? displayLinkedIn(contact.linkedin) : '',
-    contact.website ? displayWebsite(contact.website) : '',
-  ].filter(Boolean)
+  const parts = contactParts(resume)
 
   if (parts.length > 0) {
     w.y += pxToMm(4)

@@ -57,6 +57,7 @@ function asString(value: unknown): string {
 
 function parseContact(raw: unknown): Contact {
   const o = isObj(raw) ? raw : {}
+  const photo = asString(o.photo)
   return {
     fullName: asString(o.fullName),
     title: asString(o.title),
@@ -65,6 +66,7 @@ function parseContact(raw: unknown): Contact {
     location: asString(o.location),
     website: asString(o.website),
     linkedin: asString(o.linkedin),
+    ...(photo.startsWith('data:image/') ? { photo } : {}),
   }
 }
 

@@ -1,17 +1,25 @@
 import {
   Document,
+  ImageRun,
   Packer,
   Paragraph,
+  Table,
+  TableBorders,
+  TableCell,
+  TableRow,
   TextRun,
   AlignmentType,
   BorderStyle,
+  VerticalAlignTable,
+  WidthType,
 } from 'docx'
 import { saveAs } from 'file-saver'
 import type { ResumeData, ResumeStyle, SectionId } from '../types/resume'
 import { SECTION_LABELS } from '../types/resume'
 import { formatDateRange, formatYearRange } from './formatDate'
 import { sortEducation, sortExperience } from './sortEntries'
-import { pxToTwip } from './pageSize'
+import { pageContentWidth, pxToTwip } from './pageSize'
+import { dataUrlToBytes, PHOTO_DISPLAY_PX } from './photo'
 import {
   DEFAULT_RESUME_STYLE,
   getFontDocx,
@@ -99,6 +107,109 @@ function bullet(text: string, ctx: DocxCtx): Paragraph {
   })
 }
 
+function contactLine(resume: ResumeData): string {
+  const { contact } = resume
+  return [
+    contact.location,
+    contact.email,
+    contact.phone,
+    contact.linkedin ? displayLinkedIn(contact.linkedin) : '',
+    contact.website ? displayWebsite(contact.website) : '',
+  ]
+    .filter(Boolean)
+    .join('  |  ')
+}
+
+/** Borderless two-column row: name + contact left, square photo right. */
+function buildContactWithPhoto(
+  resume: ResumeData,
+  ctx: DocxCtx,
+  photo: Uint8Array,
+  contentWidthTwip: number,
+): (Paragraph | Table)[] {
+  const photoColTwip = pxToTwip(PHOTO_DISPLAY_PX + 16)
+  const textColTwip = contentWidthTwip - photoColTwip
+  const line = contactLine(resume)
+
+  const textChildren: Paragraph[] = [
+    new Paragraph({
+      spacing: { after: line ? 80 : 0 },
+      children: [
+        new TextRun({
+          text: (resume.contact.fullName || 'Your Name').toUpperCase(),
+          bold: true,
+          size: ctx.sizes.name,
+          font: ctx.font,
+        }),
+      ],
+    }),
+  ]
+  if (line) {
+    textChildren.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: line,
+            size: ctx.sizes.contactMeta,
+            font: ctx.font,
+          }),
+        ],
+      }),
+    )
+  }
+
+  return [
+    new Table({
+      width: { size: contentWidthTwip, type: WidthType.DXA },
+      columnWidths: [textColTwip, photoColTwip],
+      borders: TableBorders.NONE,
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              width: { size: textColTwip, type: WidthType.DXA },
+              verticalAlign: VerticalAlignTable.CENTER,
+              children: textChildren,
+            }),
+            new TableCell({
+              width: { size: photoColTwip, type: WidthType.DXA },
+              verticalAlign: VerticalAlignTable.CENTER,
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.RIGHT,
+                  children: [
+                    new ImageRun({
+                      type: 'jpg',
+                      data: photo,
+                      transformation: {
+                        width: PHOTO_DISPLAY_PX,
+                        height: PHOTO_DISPLAY_PX,
+                      },
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    }),
+    // Carries the header rule under both columns
+    new Paragraph({
+      spacing: { after: 120 },
+      border: {
+        bottom: {
+          style: BorderStyle.SINGLE,
+          size: 12,
+          color: '333333',
+          space: 8,
+        },
+      },
+      children: [],
+    }),
+  ]
+}
+
 function buildContact(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
   const { contact } = resume
   const paras: Paragraph[] = [
@@ -124,22 +235,16 @@ function buildContact(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
     }),
   ]
 
-  const parts = [
-    contact.location,
-    contact.email,
-    contact.phone,
-    contact.linkedin ? displayLinkedIn(contact.linkedin) : '',
-    contact.website ? displayWebsite(contact.website) : '',
-  ].filter(Boolean)
+  const line = contactLine(resume)
 
-  if (parts.length > 0) {
+  if (line) {
     paras.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
         spacing: { after: 120 },
         children: [
           new TextRun({
-            text: parts.join('  |  '),
+            text: line,
             size: ctx.sizes.contactMeta,
             font: ctx.font,
           }),
@@ -256,7 +361,15 @@ export async function exportDocx(
     font: getFontDocx(style.fontFamily),
     sizes: scaledDocxTypography(style.fontSize),
   }
-  const children: Paragraph[] = [...buildContact(resume, ctx)]
+  const photo = resume.contact.photo
+  const children: (Paragraph | Table)[] = photo
+    ? buildContactWithPhoto(
+        resume,
+        ctx,
+        await dataUrlToBytes(photo),
+        pxToTwip(pageContentWidth(style.margins.left, style.margins.right)),
+      )
+    : buildContact(resume, ctx)
 
   for (const id of resume.sectionOrder) {
     if (id === 'contact') continue
