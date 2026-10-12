@@ -6,8 +6,15 @@ import {
   referenceContactItems,
   referenceRole,
   type ContactItem,
+  type ContactItemKey,
   type ReferenceContactItem,
 } from './contactLinks'
+import {
+  CONTACT_ICON_PATHS,
+  CONTACT_ICON_RGB,
+  CONTACT_ICON_VIEWBOX,
+  iconPathOps,
+} from './contactIcons'
 import { formatDateRange, formatMonthYear, formatYearRange } from './formatDate'
 import { toWinAnsi } from './pdfText'
 import { sortCertifications, sortEducation, sortExperience } from './sortEntries'
@@ -248,22 +255,56 @@ function buildContact(w: PdfWriter, resume: ResumeData) {
   drawRule(w)
 }
 
-type ContactSegment = { text: string; href?: string; width: number }
+type ContactSegment = {
+  text: string
+  href?: string
+  icon?: ContactItemKey
+  /** Icon, gap and text together */
+  width: number
+}
+
+/** Matches the preview's 11px icon and `gap-1` before the text. */
+const CONTACT_ICON_MM = pxToMm(11)
+const CONTACT_ICON_GAP_MM = pxToMm(4)
+
+/** Fills a contact icon as vector paths with its top-left corner at (x, y). */
+function drawContactIcon(w: PdfWriter, key: ContactItemKey, x: number, y: number) {
+  const scale = CONTACT_ICON_MM / CONTACT_ICON_VIEWBOX
+  const px = (v: number) => x + v * scale
+  const py = (v: number) => y + v * scale
+  const { doc } = w
+  for (const op of iconPathOps(CONTACT_ICON_PATHS[key])) {
+    if (op.op === 'M') doc.moveTo(px(op.x), py(op.y))
+    else if (op.op === 'L') doc.lineTo(px(op.x), py(op.y))
+    else if (op.op === 'C') {
+      doc.curveTo(px(op.x1), py(op.y1), px(op.x2), py(op.y2), px(op.x), py(op.y))
+    } else doc.close()
+  }
+  doc.setFillColor(...CONTACT_ICON_RGB)
+  doc.fill()
+}
 
 /**
  * Lays the contact line out segment by segment (not as one joined string) so
- * each link gets its own clickable area. Wraps between items, centred like
- * writeLines; an item wider than the line wraps on its own.
+ * each link gets its own clickable area and its icon. Wraps between items,
+ * centred like writeLines; an item wider than the line wraps on its own, with
+ * the icon on its first piece.
  */
 function writeContactLine(w: PdfWriter, items: ContactItem[]) {
   const size = w.sizes.contactMeta
   setStyle(w, { size, color: [82, 82, 91] })
   const sep = '  |  '
   const sepWidth = w.doc.getTextWidth(sep)
-  const measure = (text: string, href?: string): ContactSegment => ({
+  const iconWidth = CONTACT_ICON_MM + CONTACT_ICON_GAP_MM
+  const measure = (
+    text: string,
+    href?: string,
+    icon?: ContactItemKey,
+  ): ContactSegment => ({
     text,
     href,
-    width: w.doc.getTextWidth(text),
+    icon,
+    width: w.doc.getTextWidth(text) + (icon ? iconWidth : 0),
   })
 
   const lines: ContactSegment[][] = []
@@ -276,10 +317,12 @@ function writeContactLine(w: PdfWriter, items: ContactItem[]) {
   }
 
   for (const item of items) {
-    const seg = measure(toWinAnsi(item.text), item.href)
+    const seg = measure(toWinAnsi(item.text), item.href, item.key)
     if (seg.width > w.width) {
       flush()
-      for (const piece of wrap(w, seg.text)) lines.push([measure(piece, seg.href)])
+      wrap(w, seg.text, w.width - iconWidth).forEach((piece, i) => {
+        lines.push([measure(piece, seg.href, i === 0 ? seg.icon : undefined)])
+      })
       continue
     }
     const added = (current.length > 0 ? sepWidth : 0) + seg.width
@@ -301,14 +344,21 @@ function writeContactLine(w: PdfWriter, items: ContactItem[]) {
     const lineWidth =
       line.reduce((sum, seg) => sum + seg.width, 0) + sepWidth * (line.length - 1)
     const baseline = w.y + ascent * 0.85
+    // Centre icons on the lowercase body of the text, as the preview's items-center does
+    const iconTop = baseline - ascent * 0.35 - CONTACT_ICON_MM / 2
     let x = PAGE_WIDTH_MM / 2 - lineWidth / 2
     line.forEach((seg, i) => {
       if (i > 0) {
         w.doc.text(sep, x, baseline)
         x += sepWidth
       }
-      w.doc.text(seg.text, x, baseline)
       if (seg.href) w.doc.link(x, w.y, seg.width, lh, { url: seg.href })
+      let textX = x
+      if (seg.icon) {
+        drawContactIcon(w, seg.icon, x, iconTop)
+        textX += iconWidth
+      }
+      w.doc.text(seg.text, textX, baseline)
       x += seg.width
     })
     w.y += lh

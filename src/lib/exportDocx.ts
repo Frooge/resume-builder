@@ -5,7 +5,12 @@ import {
   TextRun,
   AlignmentType,
   BorderStyle,
+  DocumentDefaults,
   ExternalHyperlink,
+  ImageRun,
+  ImportedXmlComponent,
+  TabStopType,
+  type ParagraphChild,
 } from 'docx'
 import { saveAs } from 'file-saver'
 import type { ResumeData, ResumeStyle, SectionId } from '../types/resume'
@@ -14,11 +19,13 @@ import {
   contactLinks,
   referenceContactItems,
   referenceRole,
+  type ContactItemKey,
 } from './contactLinks'
+import { contactIconPng } from './contactIcons'
 import { formatDateRange, formatMonthYear, formatYearRange } from './formatDate'
 import { sortCertifications, sortEducation, sortExperience } from './sortEntries'
 import { visibleSectionOrder } from './sectionOrder'
-import { pxToTwip } from './pageSize'
+import { pageContentWidth, pxToTwip } from './pageSize'
 import {
   DEFAULT_RESUME_STYLE,
   getFontDocx,
@@ -39,6 +46,33 @@ function slugify(name: string): string {
 type DocxCtx = {
   font: string
   sizes: DocxTypographyScale
+  /** Right edge of the text area, for right-aligned dates after a tab */
+  contentWidthTwip: number
+  /** PNG bytes for each contact icon on the contact line */
+  icons: Partial<Record<ContactItemKey, Uint8Array>>
+}
+
+/** Matches the preview's 11px contact icons. */
+const CONTACT_ICON_PX = 11
+
+/**
+ * Apple Pages ignores all direct paragraph formatting (alignment, spacing,
+ * borders, indents, tabs) unless the document declares a default paragraph
+ * style, which docx doesn't emit on its own.
+ */
+function normalParagraphStyle(): ImportedXmlComponent {
+  const style = new ImportedXmlComponent('w:style', {
+    'w:type': 'paragraph',
+    'w:default': '1',
+    'w:styleId': 'Normal',
+  })
+  style.push(new ImportedXmlComponent('w:name', { 'w:val': 'Normal' }))
+  style.push(new ImportedXmlComponent('w:qFormat'))
+  return style
+}
+
+function rightTab(ctx: DocxCtx) {
+  return [{ type: TabStopType.RIGHT, position: ctx.contentWidthTwip }]
 }
 
 function heading(text: string, ctx: DocxCtx): Paragraph {
@@ -85,7 +119,8 @@ function body(
 function bullet(text: string, ctx: DocxCtx): Paragraph {
   return new Paragraph({
     spacing: { after: 40 },
-    indent: { left: 360 },
+    // Hanging indent so wrapped lines align with the text, not the bullet
+    indent: { left: 540, hanging: 180 },
     children: [
       new TextRun({
         text: `• ${text}`,
@@ -131,10 +166,25 @@ function buildContact(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
         spacing: { after: 120 },
         // Links stay in the body text colour (no Hyperlink style) to match the preview
         children: items.flatMap((item, i) => {
-          const node = item.href
-            ? new ExternalHyperlink({ link: item.href, children: [run(item.text)] })
-            : run(item.text)
-          return i === 0 ? [node] : [run('  |  '), node]
+          const icon = ctx.icons[item.key]
+          const content: ParagraphChild[] = icon
+            ? [
+                new ImageRun({
+                  type: 'png',
+                  data: icon,
+                  transformation: {
+                    width: CONTACT_ICON_PX,
+                    height: CONTACT_ICON_PX,
+                  },
+                }),
+                run(' '),
+                run(item.text),
+              ]
+            : [run(item.text)]
+          const nodes = item.href
+            ? [new ExternalHyperlink({ link: item.href, children: content })]
+            : content
+          return i === 0 ? nodes : [run('  |  '), ...nodes]
         }),
       }),
     )
@@ -157,6 +207,7 @@ function buildExperience(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
     paras.push(
       new Paragraph({
         spacing: { before: 120, after: 0 },
+        tabStops: rightTab(ctx),
         children: [
           new TextRun({
             text: entry.role || 'Role',
@@ -238,6 +289,7 @@ function buildCertifications(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
     paras.push(
       new Paragraph({
         spacing: { before: 60, after: 0 },
+        tabStops: rightTab(ctx),
         children: [
           new TextRun({
             text: entry.name || 'Certification',
@@ -340,9 +392,15 @@ export async function exportDocx(
   fileName: string,
   style: ResumeStyle = DEFAULT_RESUME_STYLE,
 ): Promise<void> {
+  const keys = [...new Set(contactLinks(resume.contact).map((item) => item.key))]
+  const pngs = await Promise.all(keys.map((key) => contactIconPng(key)))
   const ctx: DocxCtx = {
     font: getFontDocx(style.fontFamily),
     sizes: scaledDocxTypography(style.fontSize),
+    contentWidthTwip: pxToTwip(
+      pageContentWidth(style.margins.left, style.margins.right),
+    ),
+    icons: Object.fromEntries(keys.map((key, i) => [key, pngs[i]])),
   }
   const children: Paragraph[] = [...buildContact(resume, ctx)]
 
@@ -351,6 +409,12 @@ export async function exportDocx(
   }
 
   const doc = new Document({
+    styles: {
+      importedStyles: [
+        new DocumentDefaults({ run: { font: ctx.font, size: ctx.sizes.body } }),
+        normalParagraphStyle(),
+      ],
+    },
     sections: [
       {
         properties: {

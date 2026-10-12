@@ -27,6 +27,7 @@ import {
   referenceRole,
   type ContactItemKey,
 } from '../../lib/contactLinks'
+import { CONTACT_ICON_PATHS, CONTACT_ICON_VIEWBOX } from '../../lib/contactIcons'
 import {
   sortCertifications,
   sortEducation,
@@ -127,52 +128,13 @@ type FlowUnit =
     }
   | { key: string; sectionId: 'education'; kind: 'education-empty' }
 
-function IconPin() {
+function ContactIcon({ itemKey }: { itemKey: ContactItemKey }) {
+  const box = CONTACT_ICON_VIEWBOX
   return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z" />
+    <svg width="11" height="11" viewBox={`0 0 ${box} ${box}`} fill="currentColor" aria-hidden>
+      <path d={CONTACT_ICON_PATHS[itemKey]} />
     </svg>
   )
-}
-
-function IconMail() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
-    </svg>
-  )
-}
-
-function IconPhone() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1.1-.2 1.2.4 2.5.6 3.8.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.6.6 3.8.1.4 0 .8-.3 1.1L6.6 10.8z" />
-    </svg>
-  )
-}
-
-function IconLinkedIn() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zM8.3 18.3H5.7V9.7h2.6v8.6zM7 8.4a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm11.3 9.9h-2.6v-4.2c0-1-.4-1.7-1.5-1.7-.8 0-1.3.5-1.5 1-.1.2-.1.5-.1.8v4.1H9.9s.05-6.7 0-7.4h2.6v1.1c.3-.5 1-1.3 2.4-1.3 1.8 0 3.1 1.2 3.1 3.7v3.9z" />
-    </svg>
-  )
-}
-
-function IconGlobe() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm6.9 6h-2.8a15 15 0 00-1.3-3.3A8 8 0 0118.9 8zM12 4c.7 0 2 1.7 2.6 4H9.4C10 5.7 11.3 4 12 4zM4.3 14a8 8 0 010-4h3.2a17 17 0 000 4H4.3zM5.1 16h2.8c.3 1.2.7 2.4 1.3 3.3A8 8 0 015.1 16zM8.1 8H5.1a8 8 0 014.1-3.3A15 15 0 008.1 8zM12 20c-.7 0-2-1.7-2.6-4h5.2c-.6 2.3-1.9 4-2.6 4zm2.7-6H9.3a15 15 0 010-4h5.4a15 15 0 010 4zm.1 5.3c.6-.9 1-2.1 1.3-3.3h2.8a8 8 0 01-4.1 3.3zM16.7 14h3a8 8 0 000-4h-3a17 17 0 010 4z" />
-    </svg>
-  )
-}
-
-const CONTACT_ICONS: Record<ContactItemKey, () => ReactNode> = {
-  location: IconPin,
-  email: IconMail,
-  phone: IconPhone,
-  linkedin: IconLinkedIn,
-  website: IconGlobe,
 }
 
 function ContactItem({
@@ -184,11 +146,10 @@ function ContactItem({
   text: string
   href?: string
 }) {
-  const Icon = CONTACT_ICONS[itemKey]
   const body = (
     <>
       <span className="text-zinc-600">
-        <Icon />
+        <ContactIcon itemKey={itemKey} />
       </span>
       <span>{text}</span>
     </>
