@@ -197,6 +197,37 @@ function contactParts(resume: ResumeData): string[] {
   ].filter(Boolean)
 }
 
+/**
+ * Packs whole contact items onto lines so an item like "San Francisco, CA"
+ * never splits across lines. Assumes the text style is already set.
+ */
+function packParts(
+  w: PdfWriter,
+  parts: string[],
+  maxWidth: number,
+  sep = '  |  ',
+): string[] {
+  const lines: string[] = []
+  let current = ''
+  for (const part of parts) {
+    const candidate = current ? `${current}${sep}${part}` : part
+    if (w.doc.getTextWidth(candidate) <= maxWidth) {
+      current = candidate
+      continue
+    }
+    if (current) lines.push(current)
+    if (w.doc.getTextWidth(part) <= maxWidth) {
+      current = part
+    } else {
+      const pieces = wrap(w, part, maxWidth)
+      lines.push(...pieces.slice(0, -1))
+      current = pieces[pieces.length - 1] ?? ''
+    }
+  }
+  if (current) lines.push(current)
+  return lines
+}
+
 /** Name and contact on the left, square photo on the right edge. */
 function buildContactWithPhoto(
   w: PdfWriter,
@@ -205,7 +236,7 @@ function buildContactWithPhoto(
 ) {
   const top = w.y
   const photoMm = pxToMm(PHOTO_DISPLAY_PX)
-  const textWidth = w.width - photoMm - pxToMm(16)
+  const textWidth = w.width - photoMm - pxToMm(24)
   const name = (resume.contact.fullName || 'Your Name').toUpperCase()
   const parts = contactParts(resume)
 
@@ -224,7 +255,7 @@ function buildContactWithPhoto(
   setStyle(w, nameOpts)
   const nameLines = wrap(w, name, textWidth)
   setStyle(w, metaOpts)
-  const metaLines = parts.length > 0 ? wrap(w, parts.join('  |  '), textWidth) : []
+  const metaLines = packParts(w, parts, textWidth)
 
   const textHeight =
     nameLines.length * lineHeightMm(nameOpts.size, nameOpts.leading) +

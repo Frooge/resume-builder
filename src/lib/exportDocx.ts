@@ -107,7 +107,11 @@ function bullet(text: string, ctx: DocxCtx): Paragraph {
   })
 }
 
-function contactLine(resume: ResumeData): string {
+/**
+ * With keepItemsTogether, spaces inside each item become non-breaking so
+ * Word only wraps at the separators.
+ */
+function contactLine(resume: ResumeData, keepItemsTogether = false): string {
   const { contact } = resume
   return [
     contact.location,
@@ -117,6 +121,7 @@ function contactLine(resume: ResumeData): string {
     contact.website ? displayWebsite(contact.website) : '',
   ]
     .filter(Boolean)
+    .map((part) => (keepItemsTogether ? part.replace(/ /g, '\u00A0') : part))
     .join('  |  ')
 }
 
@@ -127,9 +132,9 @@ function buildContactWithPhoto(
   photo: Uint8Array,
   contentWidthTwip: number,
 ): (Paragraph | Table)[] {
-  const photoColTwip = pxToTwip(PHOTO_DISPLAY_PX + 16)
+  const photoColTwip = pxToTwip(PHOTO_DISPLAY_PX + 24)
   const textColTwip = contentWidthTwip - photoColTwip
-  const line = contactLine(resume)
+  const line = contactLine(resume, true)
 
   const textChildren: Paragraph[] = [
     new Paragraph({

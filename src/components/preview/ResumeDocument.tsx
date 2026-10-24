@@ -215,7 +215,7 @@ function ContactBlock({ resume }: { resume: ResumeData }) {
   // Fixed photo size keeps the off-screen height measurement stable
   // before the image decodes.
   return (
-    <header className="flex items-center gap-4 border-b border-zinc-800 pb-3">
+    <header className="flex items-center gap-6 border-b border-zinc-800 pb-3">
       <div className="min-w-0 flex-1 text-left">{text}</div>
       <img
         src={contact.photo}

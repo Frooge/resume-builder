@@ -1,6 +1,6 @@
-export const PHOTO_SIZE_PX = 256
+export const PHOTO_SIZE_PX = 360
 /** Rendered size of the header photo in the preview and exports. */
-export const PHOTO_DISPLAY_PX = 72
+export const PHOTO_DISPLAY_PX = 120
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 
 export class PhotoError extends Error {
