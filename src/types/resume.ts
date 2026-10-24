@@ -19,6 +19,8 @@ export interface Contact {
   /** URL or handle; `linkedinLabel` is the text shown. */
   linkedin: string
   linkedinLabel: string
+  /** Square JPEG data URL, resized client-side. */
+  photo?: string
 }
 
 export interface ExperienceEntry {

@@ -1,15 +1,21 @@
 import {
   Document,
+  ImageRun,
   Packer,
   Paragraph,
+  Table,
+  TableBorders,
+  TableCell,
+  TableRow,
   TextRun,
   AlignmentType,
   BorderStyle,
   DocumentDefaults,
   ExternalHyperlink,
-  ImageRun,
   ImportedXmlComponent,
   TabStopType,
+  VerticalAlignTable,
+  WidthType,
   type ParagraphChild,
 } from 'docx'
 import { saveAs } from 'file-saver'
@@ -26,6 +32,7 @@ import { formatDateRange, formatMonthYear, formatYearRange } from './formatDate'
 import { sortCertifications, sortEducation, sortExperience } from './sortEntries'
 import { visibleSectionOrder } from './sectionOrder'
 import { pageContentWidth, pxToTwip } from './pageSize'
+import { dataUrlToBytes, PHOTO_DISPLAY_PX } from './photo'
 import {
   DEFAULT_RESUME_STYLE,
   getFontDocx,
@@ -131,6 +138,124 @@ function bullet(text: string, ctx: DocxCtx): Paragraph {
   })
 }
 
+/**
+ * Contact items with their icons and links, joined by separators. With
+ * keepItemsTogether, spaces inside each item become non-breaking so Word only
+ * wraps between items.
+ */
+function contactLineChildren(
+  resume: ResumeData,
+  ctx: DocxCtx,
+  keepItemsTogether = false,
+): ParagraphChild[] {
+  const keep = (text: string) =>
+    keepItemsTogether ? text.replace(/ /g, '\u00A0') : text
+  const run = (text: string) =>
+    new TextRun({ text, size: ctx.sizes.contactMeta, font: ctx.font })
+  // Links stay in the body text colour (no Hyperlink style) to match the preview
+  return contactLinks(resume.contact).flatMap((item, i) => {
+    const icon = ctx.icons[item.key]
+    const content: ParagraphChild[] = icon
+      ? [
+          new ImageRun({
+            type: 'png',
+            data: icon,
+            transformation: {
+              width: CONTACT_ICON_PX,
+              height: CONTACT_ICON_PX,
+            },
+          }),
+          run(keep(' ')),
+          run(keep(item.text)),
+        ]
+      : [run(keep(item.text))]
+    const nodes = item.href
+      ? [new ExternalHyperlink({ link: item.href, children: content })]
+      : content
+    return i === 0 ? nodes : [run('  |  '), ...nodes]
+  })
+}
+
+/** Borderless two-column row: name + contact left, square photo right. */
+function buildContactWithPhoto(
+  resume: ResumeData,
+  ctx: DocxCtx,
+  photo: Uint8Array,
+): (Paragraph | Table)[] {
+  const contentWidthTwip = ctx.contentWidthTwip
+  const photoColTwip = pxToTwip(PHOTO_DISPLAY_PX + 24)
+  const textColTwip = contentWidthTwip - photoColTwip
+  const line = contactLineChildren(resume, ctx, true)
+
+  const textChildren: Paragraph[] = [
+    new Paragraph({
+      spacing: { after: line.length > 0 ? 80 : 0 },
+      children: [
+        new TextRun({
+          text: (resume.contact.fullName || 'Your Name').toUpperCase(),
+          bold: true,
+          size: ctx.sizes.name,
+          font: ctx.font,
+        }),
+      ],
+    }),
+  ]
+  if (line.length > 0) {
+    textChildren.push(new Paragraph({ children: line }))
+  }
+
+  return [
+    new Table({
+      width: { size: contentWidthTwip, type: WidthType.DXA },
+      columnWidths: [textColTwip, photoColTwip],
+      borders: TableBorders.NONE,
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              width: { size: textColTwip, type: WidthType.DXA },
+              verticalAlign: VerticalAlignTable.CENTER,
+              children: textChildren,
+            }),
+            new TableCell({
+              width: { size: photoColTwip, type: WidthType.DXA },
+              verticalAlign: VerticalAlignTable.CENTER,
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.RIGHT,
+                  children: [
+                    new ImageRun({
+                      type: 'jpg',
+                      data: photo,
+                      transformation: {
+                        width: PHOTO_DISPLAY_PX,
+                        height: PHOTO_DISPLAY_PX,
+                      },
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    }),
+    // Carries the header rule under both columns
+    new Paragraph({
+      spacing: { after: 120 },
+      border: {
+        bottom: {
+          style: BorderStyle.SINGLE,
+          size: 12,
+          color: '333333',
+          space: 8,
+        },
+      },
+      children: [],
+    }),
+  ]
+}
+
 function buildContact(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
   const { contact } = resume
   const paras: Paragraph[] = [
@@ -156,36 +281,13 @@ function buildContact(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
     }),
   ]
 
-  const items = contactLinks(contact)
-  if (items.length > 0) {
-    const run = (text: string) =>
-      new TextRun({ text, size: ctx.sizes.contactMeta, font: ctx.font })
+  const line = contactLineChildren(resume, ctx)
+  if (line.length > 0) {
     paras.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
         spacing: { after: 120 },
-        // Links stay in the body text colour (no Hyperlink style) to match the preview
-        children: items.flatMap((item, i) => {
-          const icon = ctx.icons[item.key]
-          const content: ParagraphChild[] = icon
-            ? [
-                new ImageRun({
-                  type: 'png',
-                  data: icon,
-                  transformation: {
-                    width: CONTACT_ICON_PX,
-                    height: CONTACT_ICON_PX,
-                  },
-                }),
-                run(' '),
-                run(item.text),
-              ]
-            : [run(item.text)]
-          const nodes = item.href
-            ? [new ExternalHyperlink({ link: item.href, children: content })]
-            : content
-          return i === 0 ? nodes : [run('  |  '), ...nodes]
-        }),
+        children: line,
       }),
     )
   }
@@ -402,7 +504,10 @@ export async function exportDocx(
     ),
     icons: Object.fromEntries(keys.map((key, i) => [key, pngs[i]])),
   }
-  const children: Paragraph[] = [...buildContact(resume, ctx)]
+  const photo = resume.contact.photo
+  const children: (Paragraph | Table)[] = photo
+    ? buildContactWithPhoto(resume, ctx, await dataUrlToBytes(photo))
+    : buildContact(resume, ctx)
 
   for (const id of visibleSectionOrder(resume)) {
     children.push(...BUILDERS[id](resume, ctx))

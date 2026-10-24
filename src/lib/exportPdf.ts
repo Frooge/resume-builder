@@ -17,6 +17,7 @@ import {
 } from './contactIcons'
 import { formatDateRange, formatMonthYear, formatYearRange } from './formatDate'
 import { toWinAnsi } from './pdfText'
+import { PHOTO_DISPLAY_PX } from './photo'
 import { sortCertifications, sortEducation, sortExperience } from './sortEntries'
 import { visibleSectionOrder } from './sectionOrder'
 import {
@@ -150,13 +151,14 @@ function writeLines(
     align?: 'left' | 'center'
     leading?: number
     after?: number
+    x?: number
   },
 ) {
   if (lines.length === 0) return
   setStyle(w, opts)
   const lh = lineHeightMm(opts.size, opts.leading ?? 1.45)
   const ascent = pxToMm(opts.size)
-  const x = opts.align === 'center' ? PAGE_WIDTH_MM / 2 : w.left
+  const x = opts.x ?? (opts.align === 'center' ? PAGE_WIDTH_MM / 2 : w.left)
 
   for (const line of lines) {
     ensureSpace(w, lh)
@@ -235,8 +237,54 @@ function heading(w: PdfWriter, text: string) {
   w.y += HEADING_AFTER_MM - pxToMm(6)
 }
 
+/** Name and contact on the left, square photo on the right edge. */
+function buildContactWithPhoto(
+  w: PdfWriter,
+  resume: ResumeData,
+  photo: string,
+) {
+  const top = w.y
+  const photoMm = pxToMm(PHOTO_DISPLAY_PX)
+  const textWidth = w.width - photoMm - pxToMm(24)
+  const name = (resume.contact.fullName || 'Your Name').toUpperCase()
+
+  const nameOpts = {
+    size: w.sizes.name,
+    bold: true,
+    color: [24, 24, 27] as [number, number, number],
+    leading: 1.15,
+  }
+
+  setStyle(w, nameOpts)
+  const nameLines = wrap(w, name, textWidth)
+  const contactLines = layoutContactLine(w, contactLinks(resume.contact), textWidth)
+
+  const textHeight =
+    nameLines.length * lineHeightMm(nameOpts.size, nameOpts.leading) +
+    (contactLines.length > 0
+      ? pxToMm(4) + contactLines.length * lineHeightMm(w.sizes.contactMeta, 1.4)
+      : 0)
+
+  w.y = top + Math.max(0, (photoMm - textHeight) / 2)
+  writeLines(w, nameLines, nameOpts)
+  if (contactLines.length > 0) {
+    w.y += pxToMm(4)
+    drawContactLines(w, contactLines, w.left)
+  }
+
+  w.doc.addImage(photo, 'JPEG', w.right - photoMm, top, photoMm, photoMm)
+  w.y = Math.max(w.y, top + photoMm)
+
+  w.y += pxToMm(8)
+  drawRule(w)
+}
+
 function buildContact(w: PdfWriter, resume: ResumeData) {
   const { contact } = resume
+  if (contact.photo) {
+    buildContactWithPhoto(w, resume, contact.photo)
+    return
+  }
   writeLines(w, [(contact.fullName || 'Your Name').toUpperCase()], {
     size: w.sizes.name,
     bold: true,
@@ -284,17 +332,21 @@ function drawContactIcon(w: PdfWriter, key: ContactItemKey, x: number, y: number
   doc.fill()
 }
 
+const CONTACT_SEP = '  |  '
+
 /**
  * Lays the contact line out segment by segment (not as one joined string) so
- * each link gets its own clickable area and its icon. Wraps between items,
- * centred like writeLines; an item wider than the line wraps on its own, with
- * the icon on its first piece.
+ * each link gets its own clickable area and its icon. Wraps between items
+ * within maxWidth; an item wider than the line wraps on its own, with the
+ * icon on its first piece.
  */
-function writeContactLine(w: PdfWriter, items: ContactItem[]) {
-  const size = w.sizes.contactMeta
-  setStyle(w, { size, color: [82, 82, 91] })
-  const sep = '  |  '
-  const sepWidth = w.doc.getTextWidth(sep)
+function layoutContactLine(
+  w: PdfWriter,
+  items: ContactItem[],
+  maxWidth: number,
+): ContactSegment[][] {
+  setStyle(w, { size: w.sizes.contactMeta, color: [82, 82, 91] })
+  const sepWidth = w.doc.getTextWidth(CONTACT_SEP)
   const iconWidth = CONTACT_ICON_MM + CONTACT_ICON_GAP_MM
   const measure = (
     text: string,
@@ -318,15 +370,15 @@ function writeContactLine(w: PdfWriter, items: ContactItem[]) {
 
   for (const item of items) {
     const seg = measure(toWinAnsi(item.text), item.href, item.key)
-    if (seg.width > w.width) {
+    if (seg.width > maxWidth) {
       flush()
-      wrap(w, seg.text, w.width - iconWidth).forEach((piece, i) => {
+      wrap(w, seg.text, maxWidth - iconWidth).forEach((piece, i) => {
         lines.push([measure(piece, seg.href, i === 0 ? seg.icon : undefined)])
       })
       continue
     }
     const added = (current.length > 0 ? sepWidth : 0) + seg.width
-    if (current.length > 0 && currentWidth + added > w.width) {
+    if (current.length > 0 && currentWidth + added > maxWidth) {
       flush()
       current.push(seg)
       currentWidth = seg.width
@@ -336,7 +388,19 @@ function writeContactLine(w: PdfWriter, items: ContactItem[]) {
     }
   }
   flush()
+  return lines
+}
 
+/** Draws laid-out contact lines centred on the page, or from `left` if given. */
+function drawContactLines(
+  w: PdfWriter,
+  lines: ContactSegment[][],
+  left?: number,
+) {
+  const size = w.sizes.contactMeta
+  setStyle(w, { size, color: [82, 82, 91] })
+  const sepWidth = w.doc.getTextWidth(CONTACT_SEP)
+  const iconWidth = CONTACT_ICON_MM + CONTACT_ICON_GAP_MM
   const lh = lineHeightMm(size, 1.4)
   const ascent = pxToMm(size)
   for (const line of lines) {
@@ -346,10 +410,10 @@ function writeContactLine(w: PdfWriter, items: ContactItem[]) {
     const baseline = w.y + ascent * 0.85
     // Centre icons on the lowercase body of the text, as the preview's items-center does
     const iconTop = baseline - ascent * 0.35 - CONTACT_ICON_MM / 2
-    let x = PAGE_WIDTH_MM / 2 - lineWidth / 2
+    let x = left ?? PAGE_WIDTH_MM / 2 - lineWidth / 2
     line.forEach((seg, i) => {
       if (i > 0) {
-        w.doc.text(sep, x, baseline)
+        w.doc.text(CONTACT_SEP, x, baseline)
         x += sepWidth
       }
       if (seg.href) w.doc.link(x, w.y, seg.width, lh, { url: seg.href })
@@ -363,6 +427,10 @@ function writeContactLine(w: PdfWriter, items: ContactItem[]) {
     })
     w.y += lh
   }
+}
+
+function writeContactLine(w: PdfWriter, items: ContactItem[]) {
+  drawContactLines(w, layoutContactLine(w, items, w.width))
 }
 
 function buildSummary(w: PdfWriter, resume: ResumeData) {
