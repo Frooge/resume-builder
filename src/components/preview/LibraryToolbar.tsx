@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useRef, type ChangeEvent } from 'react'
 import { resumeImporters, type ResumeImporter } from '../../lib/import'
 import { ResumeFileError } from '../../lib/resumeFile'
 import { useResumeStore } from '../../store/resumeStore'
+import { toast } from '../../store/toastStore'
 import {
   ToolbarMenu,
   ToolbarMenuItem,
@@ -17,6 +18,17 @@ function formatUpdatedAt(iso: string): string {
     hour: 'numeric',
     minute: '2-digit',
   })
+}
+
+/** Persisting to localStorage throws synchronously when the quota is full. */
+function trySave(save: () => void, successMessage: string) {
+  try {
+    save()
+    toast.success(successMessage)
+  } catch (error) {
+    console.error(error)
+    toast.error('Could not save: browser storage is full.')
+  }
 }
 
 export function LibraryToolbar() {
@@ -36,14 +48,6 @@ export function LibraryToolbar() {
     savedResumes.find((s) => s.id === activeSavedId)?.name ?? ''
   const defaultName = activeName || resume.contact.fullName.trim() || ''
 
-  const [status, setStatus] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!status) return
-    const t = window.setTimeout(() => setStatus(null), 2000)
-    return () => window.clearTimeout(t)
-  }, [status])
-
   const resolveName = () => {
     if (activeName) return activeName
     if (resume.contact.fullName.trim()) return resume.contact.fullName.trim()
@@ -52,8 +56,8 @@ export function LibraryToolbar() {
   }
 
   const handleSave = () => {
-    saveCurrent(resolveName())
-    setStatus('Saved')
+    const name = resolveName()
+    trySave(() => saveCurrent(name), `Saved “${name}”`)
   }
 
   const handleSaveAsNew = (close: () => void) => {
@@ -64,8 +68,7 @@ export function LibraryToolbar() {
       )?.trim() ||
       defaultName ||
       'Untitled resume'
-    saveAsNew(name)
-    setStatus('Saved as new')
+    trySave(() => saveAsNew(name), `Saved as “${name}”`)
     close()
   }
 
@@ -96,13 +99,13 @@ export function LibraryToolbar() {
         return
       }
       applyImported(imported)
-      setStatus('Imported')
+      toast.success(`Imported ${file.name}`)
     } catch (error) {
       const message =
         error instanceof ResumeFileError
           ? error.message
           : 'Could not import this file.'
-      window.alert(message)
+      toast.error(message)
     }
   }
 
@@ -120,6 +123,8 @@ export function LibraryToolbar() {
     }
     loadSaved(id)
     close()
+    const entry = savedResumes.find((s) => s.id === id)
+    if (entry) toast.success(`Loaded “${entry.name}”`)
   }
 
   return (
@@ -131,6 +136,7 @@ export function LibraryToolbar() {
               onClick={() => {
                 newResume()
                 close()
+                toast.success('Started a blank resume')
               }}
             >
               New blank
@@ -199,6 +205,7 @@ export function LibraryToolbar() {
                         )
                       ) {
                         deleteSaved(entry.id)
+                        toast.success(`Deleted “${entry.name}”`)
                       }
                     }}
                     className="px-2.5 text-[11px] text-zinc-400 hover:bg-red-50 hover:text-red-700"
@@ -211,9 +218,6 @@ export function LibraryToolbar() {
           )
         }
       </ToolbarMenu>
-      {status ? (
-        <span className="text-[11px] text-zinc-500">{status}</span>
-      ) : null}
     </div>
   )
 }

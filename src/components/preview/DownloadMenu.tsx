@@ -3,56 +3,36 @@ import { useResumeStore } from '../../store/resumeStore'
 import { exportDocx } from '../../lib/exportDocx'
 import { exportJson } from '../../lib/exportJson'
 import { exportPdf } from '../../lib/exportPdf'
+import { toast } from '../../store/toastStore'
 import { ToolbarMenu, ToolbarMenuItem, ToolbarMenuSeparator } from './ToolbarMenu'
+
+const EXPORTERS = { pdf: exportPdf, docx: exportDocx, json: exportJson }
+type ExportFormat = keyof typeof EXPORTERS
 
 export function DownloadMenu() {
   const resume = useResumeStore((s) => s.resume)
   const style = useResumeStore((s) => s.style)
-  const [exporting, setExporting] = useState<'pdf' | 'docx' | 'json' | null>(
-    null,
-  )
+  const [exporting, setExporting] = useState<ExportFormat | null>(null)
 
-  const handlePdf = async (close: () => void) => {
+  const handleExport = async (format: ExportFormat, close: () => void) => {
     close()
-    setExporting('pdf')
+    setExporting(format)
+    const kind = format.toUpperCase()
     try {
       const name = resume.contact.fullName || 'resume'
-      await exportPdf(resume, name, style)
+      await EXPORTERS[format](resume, name, style)
+      toast.success(`${kind} downloaded`)
+    } catch (error) {
+      console.error(error)
+      toast.error(`Could not export ${kind}. Please try again.`)
     } finally {
       setExporting(null)
     }
   }
 
-  const handleDocx = async (close: () => void) => {
-    close()
-    setExporting('docx')
-    try {
-      const name = resume.contact.fullName || 'resume'
-      await exportDocx(resume, name, style)
-    } finally {
-      setExporting(null)
-    }
-  }
-
-  const handleJson = async (close: () => void) => {
-    close()
-    setExporting('json')
-    try {
-      const name = resume.contact.fullName || 'resume'
-      await exportJson(resume, name, style)
-    } finally {
-      setExporting(null)
-    }
-  }
-
-  const label =
-    exporting === 'pdf'
-      ? 'Exporting PDF…'
-      : exporting === 'docx'
-        ? 'Exporting DOCX…'
-        : exporting === 'json'
-          ? 'Exporting JSON…'
-          : 'Download'
+  const label = exporting
+    ? `Exporting ${exporting.toUpperCase()}…`
+    : 'Download'
 
   return (
     <ToolbarMenu
@@ -63,14 +43,14 @@ export function DownloadMenu() {
     >
       {(close) => (
         <>
-          <ToolbarMenuItem onClick={() => void handlePdf(close)}>
+          <ToolbarMenuItem onClick={() => void handleExport('pdf', close)}>
             Download PDF
           </ToolbarMenuItem>
-          <ToolbarMenuItem onClick={() => void handleDocx(close)}>
+          <ToolbarMenuItem onClick={() => void handleExport('docx', close)}>
             Download DOCX
           </ToolbarMenuItem>
           <ToolbarMenuSeparator />
-          <ToolbarMenuItem onClick={() => void handleJson(close)}>
+          <ToolbarMenuItem onClick={() => void handleExport('json', close)}>
             Download JSON
           </ToolbarMenuItem>
         </>
