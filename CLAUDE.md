@@ -28,7 +28,9 @@ Sections listed in `resume.hiddenSections` (toggled from the editor's accordion 
 
 ## State and persistence
 
-`src/store/resumeStore.ts` is the single store. It persists `resume`, `style`, `savedResumes` and `activeSavedId` to localStorage under the key `resume-builder`; `ui` is session-only. The persist `merge` runs every stored resume through `parseResumeData` and every style through `normalizeResumeStyle`, so older payloads missing newer fields still load.
+`src/store/resumeStore.ts` is the single store for resume data. It persists `resume`, `style`, `savedResumes` and `activeSavedId` to localStorage under the key `resume-builder`; `ui` is session-only. The persist `merge` runs every stored resume through `parseResumeData` and every style through `normalizeResumeStyle`, so older payloads missing newer fields still load.
+
+User feedback for actions (save, load, import, export, reset) goes through `toast.success` / `toast.error` from `src/store/toastStore.ts`, a separate session-only store rendered by `Toaster` in `AppShell`; don't use `window.alert` or inline status text.
 
 Preview → editor navigation goes through the store: clicking edit on a preview section calls `requestFocusSection`, and `EditorPanel` reacts to `ui.focusSectionRequest` by opening and scrolling to that section.
 

@@ -6,6 +6,7 @@ import {
 } from '@dnd-kit/sortable'
 import { isPinnedSection } from '../../lib/sectionOrder'
 import { useResumeStore } from '../../store/resumeStore'
+import { toast } from '../../store/toastStore'
 import type { SectionId } from '../../types/resume'
 import { sectionCollisionDetection, useSectionSensors } from '../sectionDnd'
 import { AccordionSection } from './fields'
@@ -65,7 +66,10 @@ export function EditorPanel() {
         </div>
         <button
           type="button"
-          onClick={resetToSample}
+          onClick={() => {
+            resetToSample()
+            toast.success('Reset to the sample resume')
+          }}
           className="text-xs text-zinc-500 hover:text-zinc-800 hover:underline"
         >
           Reset sample
