@@ -1,21 +1,13 @@
-import {
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  closestCenter,
-  type DragEndEvent,
-  useSensor,
-  useSensors,
-} from '@dnd-kit/core'
+import { DndContext, type DragEndEvent } from '@dnd-kit/core'
 import {
   SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { useRef } from 'react'
+import { isPinnedSection, visibleSectionOrder } from '../../lib/sectionOrder'
 import { useResumeStore } from '../../store/resumeStore'
 import type { SectionId } from '../../types/resume'
+import { sectionCollisionDetection, useSectionSensors } from '../sectionDnd'
 import { DownloadMenu } from './DownloadMenu'
 import { AppearanceMenu } from './AppearanceMenu'
 import { LibraryToolbar } from './LibraryToolbar'
@@ -24,27 +16,19 @@ import { ResumeDocument } from './ResumeDocument'
 export function PreviewPanel() {
   const resume = useResumeStore((s) => s.resume)
   const style = useResumeStore((s) => s.style)
-  const reorderSections = useResumeStore((s) => s.reorderSections)
+  const moveSection = useResumeStore((s) => s.moveSection)
   const requestFocusSection = useResumeStore((s) => s.requestFocusSection)
   const paperRef = useRef<HTMLDivElement>(null)
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
-  )
+  const sensors = useSectionSensors()
 
-  const sortableIds = resume.sectionOrder.filter((id) => id !== 'contact')
+  const sortableIds = visibleSectionOrder(resume).filter(
+    (id) => !isPinnedSection(id),
+  )
 
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
-    if (!over || active.id === over.id) return
-
-    const oldIndex = resume.sectionOrder.indexOf(active.id as SectionId)
-    const newIndex = resume.sectionOrder.indexOf(over.id as SectionId)
-    if (oldIndex < 0 || newIndex < 0) return
-    reorderSections(arrayMove(resume.sectionOrder, oldIndex, newIndex))
+    if (over) moveSection(active.id as SectionId, over.id as SectionId)
   }
 
   return (
@@ -67,7 +51,7 @@ export function PreviewPanel() {
         <div ref={paperRef} className="mx-auto w-fit origin-top scale-[0.82]">
           <DndContext
             sensors={sensors}
-            collisionDetection={closestCenter}
+            collisionDetection={sectionCollisionDetection}
             onDragEnd={onDragEnd}
           >
             <SortableContext

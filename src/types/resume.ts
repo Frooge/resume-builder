@@ -4,6 +4,8 @@ export type SectionId =
   | 'experience'
   | 'education'
   | 'skills'
+  | 'certifications'
+  | 'references'
 
 export interface Contact {
   fullName: string
@@ -11,8 +13,12 @@ export interface Contact {
   email: string
   phone: string
   location: string
+  /** URL; `websiteLabel` is the text shown (falls back to a tidied URL). */
   website: string
+  websiteLabel: string
+  /** URL or handle; `linkedinLabel` is the text shown. */
   linkedin: string
+  linkedinLabel: string
   /** Square JPEG data URL, resized client-side. */
   photo?: string
 }
@@ -36,6 +42,25 @@ export interface EducationEntry {
   startDate: string
   endDate: string
   details: string
+}
+
+export interface CertificationEntry {
+  id: string
+  name: string
+  issuer: string
+  /** YYYY-MM, or empty when undated. */
+  date: string
+}
+
+export interface ReferenceEntry {
+  id: string
+  name: string
+  title: string
+  company: string
+  /** How the reference knows you, e.g. "Former manager at Brightline". */
+  relationship: string
+  phone: string
+  email: string
 }
 
 export type ResumeFontId =
@@ -66,7 +91,12 @@ export interface ResumeData {
   experience: ExperienceEntry[]
   education: EducationEntry[]
   skills: string[]
+  certifications: CertificationEntry[]
+  references: ReferenceEntry[]
+  /** Show "References available upon request." instead of the entries. */
+  referencesOnRequest: boolean
   sectionOrder: SectionId[]
+  hiddenSections: SectionId[]
 }
 
 export interface SavedResume {
@@ -83,6 +113,8 @@ export const DEFAULT_SECTION_ORDER: SectionId[] = [
   'experience',
   'education',
   'skills',
+  'certifications',
+  'references',
 ]
 
 export const SECTION_LABELS: Record<SectionId, string> = {
@@ -91,4 +123,9 @@ export const SECTION_LABELS: Record<SectionId, string> = {
   experience: 'Experience',
   education: 'Education',
   skills: 'Skills',
+  certifications: 'Certifications',
+  references: 'References',
 }
+
+/** Shown in place of the entries when `referencesOnRequest` is on. */
+export const REFERENCES_ON_REQUEST_TEXT = 'References available upon request.'

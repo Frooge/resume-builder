@@ -1,4 +1,8 @@
-import type { EducationEntry, ExperienceEntry } from '../types/resume'
+import type {
+  CertificationEntry,
+  EducationEntry,
+  ExperienceEntry,
+} from '../types/resume'
 
 /** YYYY-MM comparable key; current/empty end sorts as most recent. */
 function endKey(endDate: string, current?: boolean): string {
@@ -39,4 +43,19 @@ export function sortEducation(entries: EducationEntry[]): EducationEntry[] {
 
     return a.id.localeCompare(b.id)
   })
+}
+
+/** Newest first; undated entries keep their stored order after the dated ones. */
+export function sortCertifications(
+  entries: CertificationEntry[],
+): CertificationEntry[] {
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => {
+      const ad = a.entry.date.trim()
+      const bd = b.entry.date.trim()
+      if (!ad !== !bd) return ad ? -1 : 1
+      return bd.localeCompare(ad) || a.index - b.index
+    })
+    .map(({ entry }) => entry)
 }

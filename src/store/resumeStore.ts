@@ -1,12 +1,16 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { parseResumeData } from '../lib/resumeFile'
 import { createEmptyResume, createId, sampleResume } from '../lib/sampleResume'
+import { moveSection as moveSectionInOrder } from '../lib/sectionOrder'
 import { DEFAULT_RESUME_STYLE, normalizeResumeStyle } from '../lib/typography'
 import type {
+  CertificationEntry,
   Contact,
   EducationEntry,
   ExperienceEntry,
   PageMargins,
+  ReferenceEntry,
   ResumeData,
   ResumeStyle,
   SavedResume,
@@ -36,8 +40,16 @@ interface ResumeStore {
   addEducation: () => void
   updateEducation: (id: string, patch: Partial<EducationEntry>) => void
   removeEducation: (id: string) => void
-  reorderSections: (order: SectionId[]) => void
+  addCertification: () => void
+  updateCertification: (id: string, patch: Partial<CertificationEntry>) => void
+  removeCertification: (id: string) => void
+  addReference: () => void
+  updateReference: (id: string, patch: Partial<ReferenceEntry>) => void
+  removeReference: (id: string) => void
+  setReferencesOnRequest: (onRequest: boolean) => void
+  moveSection: (activeId: SectionId, overId: SectionId) => void
   toggleSection: (id: SectionId) => void
+  toggleSectionHidden: (id: SectionId) => void
   openSection: (id: SectionId) => void
   requestFocusSection: (id: SectionId) => void
   clearFocusSectionRequest: () => void
@@ -70,6 +82,23 @@ const emptyEducation = (): EducationEntry => ({
   startDate: '',
   endDate: '',
   details: '',
+})
+
+const emptyCertification = (): CertificationEntry => ({
+  id: createId('cert'),
+  name: '',
+  issuer: '',
+  date: '',
+})
+
+const emptyReference = (): ReferenceEntry => ({
+  id: createId('ref'),
+  name: '',
+  title: '',
+  company: '',
+  relationship: '',
+  phone: '',
+  email: '',
 })
 
 function snapshotName(resume: ResumeData, fallback: string): string {
@@ -172,9 +201,78 @@ export const useResumeStore = create<ResumeStore>()(
           },
         })),
 
-      reorderSections: (order) =>
+      addCertification: () =>
         set((state) => ({
-          resume: { ...state.resume, sectionOrder: order },
+          resume: {
+            ...state.resume,
+            certifications: [
+              ...state.resume.certifications,
+              emptyCertification(),
+            ],
+          },
+        })),
+
+      updateCertification: (id, patch) =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            certifications: state.resume.certifications.map((entry) =>
+              entry.id === id ? { ...entry, ...patch } : entry,
+            ),
+          },
+        })),
+
+      removeCertification: (id) =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            certifications: state.resume.certifications.filter(
+              (c) => c.id !== id,
+            ),
+          },
+        })),
+
+      addReference: () =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            references: [...state.resume.references, emptyReference()],
+          },
+        })),
+
+      updateReference: (id, patch) =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            references: state.resume.references.map((entry) =>
+              entry.id === id ? { ...entry, ...patch } : entry,
+            ),
+          },
+        })),
+
+      removeReference: (id) =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            references: state.resume.references.filter((r) => r.id !== id),
+          },
+        })),
+
+      setReferencesOnRequest: (referencesOnRequest) =>
+        set((state) => ({
+          resume: { ...state.resume, referencesOnRequest },
+        })),
+
+      moveSection: (activeId, overId) =>
+        set((state) => ({
+          resume: {
+            ...state.resume,
+            sectionOrder: moveSectionInOrder(
+              state.resume.sectionOrder,
+              activeId,
+              overId,
+            ),
+          },
         })),
 
       toggleSection: (id) =>
@@ -186,6 +284,20 @@ export const useResumeStore = create<ResumeStore>()(
               openSections: open
                 ? state.ui.openSections.filter((s) => s !== id)
                 : [...state.ui.openSections, id],
+            },
+          }
+        }),
+
+      toggleSectionHidden: (id) =>
+        set((state) => {
+          if (id === 'contact') return {}
+          const hidden = state.resume.hiddenSections.includes(id)
+          return {
+            resume: {
+              ...state.resume,
+              hiddenSections: hidden
+                ? state.resume.hiddenSections.filter((s) => s !== id)
+                : [...state.resume.hiddenSections, id],
             },
           }
         }),
@@ -349,9 +461,11 @@ export const useResumeStore = create<ResumeStore>()(
         return {
           ...current,
           ...p,
+          resume: p.resume ? parseResumeData(p.resume) : current.resume,
           style: normalizeResumeStyle(p.style),
           savedResumes: (p.savedResumes ?? current.savedResumes).map((s) => ({
             ...s,
+            resume: parseResumeData(s.resume),
             style: normalizeResumeStyle(s.style),
           })),
         }

@@ -7,15 +7,33 @@ import {
   type ReactNode,
 } from 'react'
 import type {
+  CertificationEntry,
   EducationEntry,
   ExperienceEntry,
+  ReferenceEntry,
   ResumeData,
   ResumeStyle,
   SectionId,
 } from '../../types/resume'
-import { SECTION_LABELS } from '../../types/resume'
-import { formatDateRange, formatYearRange } from '../../lib/formatDate'
-import { sortEducation, sortExperience } from '../../lib/sortEntries'
+import { REFERENCES_ON_REQUEST_TEXT, SECTION_LABELS } from '../../types/resume'
+import {
+  formatDateRange,
+  formatMonthYear,
+  formatYearRange,
+} from '../../lib/formatDate'
+import {
+  contactLinks,
+  referenceContactItems,
+  referenceRole,
+  type ContactItemKey,
+} from '../../lib/contactLinks'
+import { CONTACT_ICON_PATHS, CONTACT_ICON_VIEWBOX } from '../../lib/contactIcons'
+import {
+  sortCertifications,
+  sortEducation,
+  sortExperience,
+} from '../../lib/sortEntries'
+import { isPinnedSection, visibleSectionOrder } from '../../lib/sectionOrder'
 import {
   PAGE_GAP_PX,
   PAGE_HEIGHT_PX,
@@ -38,6 +56,7 @@ const SECTION_GAP_PX = 18
 const ENTRY_GAP_PX = 14
 const BULLET_GAP_PX = 2
 const SKILL_GAP_PX = 2
+const ITEM_GAP_PX = 6
 
 type FlowUnit =
   | { key: string; sectionId: SectionId; kind: 'contact' }
@@ -45,6 +64,37 @@ type FlowUnit =
   | { key: string; sectionId: 'skills'; kind: 'skills-heading' }
   | { key: string; sectionId: 'skills'; kind: 'skills-line'; line: string }
   | { key: string; sectionId: 'skills'; kind: 'skills-empty' }
+  | {
+      key: string
+      sectionId: 'certifications'
+      kind: 'certifications-heading'
+      continued: boolean
+    }
+  | {
+      key: string
+      sectionId: 'certifications'
+      kind: 'certifications-entry'
+      entry: CertificationEntry
+    }
+  | {
+      key: string
+      sectionId: 'certifications'
+      kind: 'certifications-empty'
+    }
+  | {
+      key: string
+      sectionId: 'references'
+      kind: 'references-heading'
+      continued: boolean
+    }
+  | {
+      key: string
+      sectionId: 'references'
+      kind: 'references-entry'
+      entry: ReferenceEntry
+    }
+  | { key: string; sectionId: 'references'; kind: 'references-on-request' }
+  | { key: string; sectionId: 'references'; kind: 'references-empty' }
   | {
       key: string
       sectionId: 'experience'
@@ -79,99 +129,52 @@ type FlowUnit =
     }
   | { key: string; sectionId: 'education'; kind: 'education-empty' }
 
-function displayLinkedIn(value: string): string {
-  return value
-    .replace(/^https?:\/\//, '')
-    .replace(/^(www\.)?linkedin\.com\//, '')
-    .replace(/^in\//, 'in/')
-}
-
-function displayWebsite(value: string): string {
-  return value.replace(/^https?:\/\//, '').replace(/\/$/, '')
-}
-
-function IconPin() {
+function ContactIcon({ itemKey }: { itemKey: ContactItemKey }) {
+  const box = CONTACT_ICON_VIEWBOX
   return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z" />
-    </svg>
-  )
-}
-
-function IconMail() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
-    </svg>
-  )
-}
-
-function IconPhone() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1.1-.2 1.2.4 2.5.6 3.8.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.6.6 3.8.1.4 0 .8-.3 1.1L6.6 10.8z" />
-    </svg>
-  )
-}
-
-function IconLinkedIn() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zM8.3 18.3H5.7V9.7h2.6v8.6zM7 8.4a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm11.3 9.9h-2.6v-4.2c0-1-.4-1.7-1.5-1.7-.8 0-1.3.5-1.5 1-.1.2-.1.5-.1.8v4.1H9.9s.05-6.7 0-7.4h2.6v1.1c.3-.5 1-1.3 2.4-1.3 1.8 0 3.1 1.2 3.1 3.7v3.9z" />
-    </svg>
-  )
-}
-
-function IconGlobe() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm6.9 6h-2.8a15 15 0 00-1.3-3.3A8 8 0 0118.9 8zM12 4c.7 0 2 1.7 2.6 4H9.4C10 5.7 11.3 4 12 4zM4.3 14a8 8 0 010-4h3.2a17 17 0 000 4H4.3zM5.1 16h2.8c.3 1.2.7 2.4 1.3 3.3A8 8 0 015.1 16zM8.1 8H5.1a8 8 0 014.1-3.3A15 15 0 008.1 8zM12 20c-.7 0-2-1.7-2.6-4h5.2c-.6 2.3-1.9 4-2.6 4zm2.7-6H9.3a15 15 0 010-4h5.4a15 15 0 010 4zm.1 5.3c.6-.9 1-2.1 1.3-3.3h2.8a8 8 0 01-4.1 3.3zM16.7 14h3a8 8 0 000-4h-3a17 17 0 010 4z" />
+    <svg width="11" height="11" viewBox={`0 0 ${box} ${box}`} fill="currentColor" aria-hidden>
+      <path d={CONTACT_ICON_PATHS[itemKey]} />
     </svg>
   )
 }
 
 function ContactItem({
-  icon,
-  children,
+  itemKey,
+  text,
+  href,
 }: {
-  icon: ReactNode
-  children: string
+  itemKey: ContactItemKey
+  text: string
+  href?: string
 }) {
-  return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap">
-      <span className="text-zinc-600">{icon}</span>
-      <span>{children}</span>
-    </span>
+  const body = (
+    <>
+      <span className="text-zinc-600">
+        <ContactIcon itemKey={itemKey} />
+      </span>
+      <span>{text}</span>
+    </>
+  )
+  const className = 'inline-flex items-center gap-1 whitespace-nowrap'
+
+  // Links keep the contact line's look: inherited colour, no underline
+  return href ? (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`${className} text-inherit no-underline`}
+    >
+      {body}
+    </a>
+  ) : (
+    <span className={className}>{body}</span>
   )
 }
 
 function ContactBlock({ resume }: { resume: ResumeData }) {
   const { contact } = resume
-  const items: { key: string; icon: ReactNode; text: string }[] = []
-
-  if (contact.location) {
-    items.push({ key: 'location', icon: <IconPin />, text: contact.location })
-  }
-  if (contact.email) {
-    items.push({ key: 'email', icon: <IconMail />, text: contact.email })
-  }
-  if (contact.phone) {
-    items.push({ key: 'phone', icon: <IconPhone />, text: contact.phone })
-  }
-  if (contact.linkedin) {
-    items.push({
-      key: 'linkedin',
-      icon: <IconLinkedIn />,
-      text: displayLinkedIn(contact.linkedin),
-    })
-  }
-  if (contact.website) {
-    items.push({
-      key: 'website',
-      icon: <IconGlobe />,
-      text: displayWebsite(contact.website),
-    })
-  }
+  const items = contactLinks(contact)
 
   const hasPhoto = Boolean(contact.photo)
   const text = (
@@ -188,9 +191,12 @@ function ContactBlock({ resume }: { resume: ResumeData }) {
           style={{ fontSize: 'var(--fs-contact-meta)' }}
         >
           {items.map((item) => (
-            <ContactItem key={item.key} icon={item.icon}>
-              {item.text}
-            </ContactItem>
+            <ContactItem
+              key={item.key}
+              itemKey={item.key}
+              text={item.text}
+              href={item.href}
+            />
           ))}
         </p>
       ) : (
@@ -367,10 +373,97 @@ function EducationEntryBlock({ entry }: { entry: EducationEntry }) {
   )
 }
 
-function buildFlowUnits(resume: ResumeData): FlowUnit[] {
-  const body = resume.sectionOrder.filter(
-    (id): id is Exclude<SectionId, 'contact'> => id !== 'contact',
+function CertificationEntryBlock({ entry }: { entry: CertificationEntry }) {
+  const date = formatMonthYear(entry.date)
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <p
+          className="font-semibold text-zinc-900"
+          style={{ fontSize: 'var(--fs-body)' }}
+        >
+          {entry.name || 'Certification'}
+        </p>
+        {date ? (
+          <p
+            className="shrink-0 font-normal text-zinc-500"
+            style={{ fontSize: 'var(--fs-dates)' }}
+          >
+            {date}
+          </p>
+        ) : null}
+      </div>
+      {entry.issuer.trim() ? (
+        <p
+          className="font-normal text-zinc-700"
+          style={{ fontSize: 'var(--fs-body)' }}
+        >
+          {entry.issuer}
+        </p>
+      ) : null}
+    </div>
   )
+}
+
+function ReferenceEntryBlock({ entry }: { entry: ReferenceEntry }) {
+  const role = referenceRole(entry)
+  const contacts = referenceContactItems(entry)
+
+  return (
+    <div>
+      <p
+        className="font-semibold text-zinc-900"
+        style={{ fontSize: 'var(--fs-role-title)' }}
+      >
+        {entry.name || 'Reference'}
+      </p>
+      {role ? (
+        <p
+          className="font-normal leading-[1.4] text-zinc-700"
+          style={{ fontSize: 'var(--fs-body)' }}
+        >
+          {role}
+        </p>
+      ) : null}
+      {entry.relationship.trim() ? (
+        <p
+          className="font-normal text-zinc-600"
+          style={{ fontSize: 'var(--fs-details)' }}
+        >
+          {entry.relationship}
+        </p>
+      ) : null}
+      {contacts.length > 0 ? (
+        <p
+          className="font-normal text-zinc-500"
+          style={{ fontSize: 'var(--fs-dates)' }}
+        >
+          {contacts.map((item, i) => (
+            <span key={item.text}>
+              {i > 0 ? <span className="whitespace-pre">{'  |  '}</span> : null}
+              {item.href ? (
+                <a
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-inherit no-underline"
+                >
+                  {item.text}
+                </a>
+              ) : (
+                item.text
+              )}
+            </span>
+          ))}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function buildFlowUnits(resume: ResumeData): FlowUnit[] {
+  const body = visibleSectionOrder(resume)
   const units: FlowUnit[] = [
     { key: 'contact', sectionId: 'contact', kind: 'contact' },
   ]
@@ -402,6 +495,62 @@ function buildFlowUnits(resume: ResumeData): FlowUnit[] {
             line,
           })
         })
+      }
+      continue
+    }
+    if (id === 'certifications') {
+      units.push({
+        key: 'certifications-heading',
+        sectionId: 'certifications',
+        kind: 'certifications-heading',
+        continued: false,
+      })
+      if (resume.certifications.length === 0) {
+        units.push({
+          key: 'certifications-empty',
+          sectionId: 'certifications',
+          kind: 'certifications-empty',
+        })
+      } else {
+        for (const entry of sortCertifications(resume.certifications)) {
+          units.push({
+            key: `certifications-${entry.id}`,
+            sectionId: 'certifications',
+            kind: 'certifications-entry',
+            entry,
+          })
+        }
+      }
+      continue
+    }
+    if (id === 'references') {
+      units.push({
+        key: 'references-heading',
+        sectionId: 'references',
+        kind: 'references-heading',
+        continued: false,
+      })
+      if (resume.referencesOnRequest) {
+        units.push({
+          key: 'references-on-request',
+          sectionId: 'references',
+          kind: 'references-on-request',
+        })
+      } else if (resume.references.length === 0) {
+        units.push({
+          key: 'references-empty',
+          sectionId: 'references',
+          kind: 'references-empty',
+        })
+      } else {
+        for (const entry of resume.references) {
+          units.push({
+            key: `references-${entry.id}`,
+            sectionId: 'references',
+            kind: 'references-entry',
+            entry,
+          })
+        }
       }
       continue
     }
@@ -476,12 +625,20 @@ function gapBefore(unit: FlowUnit, page: FlowUnit[]): number {
 
   if (unit.kind === 'experience-bullet') return BULLET_GAP_PX
   if (unit.kind === 'skills-line') return SKILL_GAP_PX
+  if (
+    unit.kind === 'certifications-entry' ||
+    unit.kind === 'references-on-request'
+  ) {
+    return ITEM_GAP_PX
+  }
 
   if (
     unit.kind === 'experience-header' ||
     unit.kind === 'experience-empty' ||
     unit.kind === 'education-entry' ||
-    unit.kind === 'education-empty'
+    unit.kind === 'education-empty' ||
+    unit.kind === 'references-entry' ||
+    unit.kind === 'references-empty'
   ) {
     return ENTRY_GAP_PX
   }
@@ -507,7 +664,12 @@ function packUnits(
   const heightOf = (key: string) => Math.ceil(heights[key] ?? 0)
 
   const pushContinuedHeading = (
-    kind: 'experience' | 'education' | 'skills',
+    kind:
+      | 'experience'
+      | 'education'
+      | 'skills'
+      | 'certifications'
+      | 'references',
   ) => {
     if (kind === 'experience') {
       const cont: FlowUnit = {
@@ -527,6 +689,24 @@ function packUnits(
       }
       current.push(cont)
       used += heightOf('education-heading')
+    } else if (kind === 'certifications') {
+      const cont: FlowUnit = {
+        key: `certifications-heading-cont-${pages.length}`,
+        sectionId: 'certifications',
+        kind: 'certifications-heading',
+        continued: true,
+      }
+      current.push(cont)
+      used += heightOf('certifications-heading')
+    } else if (kind === 'references') {
+      const cont: FlowUnit = {
+        key: `references-heading-cont-${pages.length}`,
+        sectionId: 'references',
+        kind: 'references-heading',
+        continued: true,
+      }
+      current.push(cont)
+      used += heightOf('references-heading')
     } else {
       const cont: FlowUnit = {
         key: `skills-heading-cont-${pages.length}`,
@@ -568,6 +748,10 @@ function packUnits(
       pushContinuedHeading('education')
     } else if (unit.kind === 'skills-line') {
       pushContinuedHeading('skills')
+    } else if (unit.kind === 'certifications-entry') {
+      pushContinuedHeading('certifications')
+    } else if (unit.kind === 'references-entry') {
+      pushContinuedHeading('references')
     }
   }
 
@@ -665,6 +849,49 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
           style={{ fontSize: 'var(--fs-muted)' }}
         >
           No skills yet.
+        </p>
+      )
+    case 'certifications-heading':
+      return (
+        <SectionHeading continued={unit.continued}>
+          {SECTION_LABELS.certifications}
+        </SectionHeading>
+      )
+    case 'certifications-entry':
+      return <CertificationEntryBlock entry={unit.entry} />
+    case 'certifications-empty':
+      return (
+        <p
+          className="italic text-zinc-400"
+          style={{ fontSize: 'var(--fs-muted)' }}
+        >
+          No certifications yet.
+        </p>
+      )
+    case 'references-heading':
+      return (
+        <SectionHeading continued={unit.continued}>
+          {SECTION_LABELS.references}
+        </SectionHeading>
+      )
+    case 'references-entry':
+      return <ReferenceEntryBlock entry={unit.entry} />
+    case 'references-on-request':
+      return (
+        <p
+          className="font-normal leading-[1.45] text-zinc-700"
+          style={{ fontSize: 'var(--fs-body)' }}
+        >
+          {REFERENCES_ON_REQUEST_TEXT}
+        </p>
+      )
+    case 'references-empty':
+      return (
+        <p
+          className="italic text-zinc-400"
+          style={{ fontSize: 'var(--fs-muted)' }}
+        >
+          No references yet.
         </p>
       )
     case 'experience-heading':
@@ -794,9 +1021,7 @@ export function ResumeDocument({
                     : 0
                   const isContinued =
                     group[0].key.includes('-cont-') ||
-                    ((group[0].kind === 'experience-heading' ||
-                      group[0].kind === 'education-heading') &&
-                      group[0].continued)
+                    ('continued' in group[0] && group[0].continued)
 
                   const body = (
                     <div>
@@ -819,7 +1044,7 @@ export function ResumeDocument({
                     <SectionChrome
                       key={`${pageIndex}-${sectionId}-${groupIndex}`}
                       id={sectionId}
-                      disableDrag={sectionId === 'contact'}
+                      disableDrag={isPinnedSection(sectionId)}
                       onEdit={() => onEditSection(sectionId)}
                     >
                       {body}

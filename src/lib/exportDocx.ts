@@ -10,14 +10,27 @@ import {
   TextRun,
   AlignmentType,
   BorderStyle,
+  DocumentDefaults,
+  ExternalHyperlink,
+  ImportedXmlComponent,
+  TabStopType,
   VerticalAlignTable,
   WidthType,
+  type ParagraphChild,
 } from 'docx'
 import { saveAs } from 'file-saver'
 import type { ResumeData, ResumeStyle, SectionId } from '../types/resume'
-import { SECTION_LABELS } from '../types/resume'
-import { formatDateRange, formatYearRange } from './formatDate'
-import { sortEducation, sortExperience } from './sortEntries'
+import { REFERENCES_ON_REQUEST_TEXT, SECTION_LABELS } from '../types/resume'
+import {
+  contactLinks,
+  referenceContactItems,
+  referenceRole,
+  type ContactItemKey,
+} from './contactLinks'
+import { contactIconPng } from './contactIcons'
+import { formatDateRange, formatMonthYear, formatYearRange } from './formatDate'
+import { sortCertifications, sortEducation, sortExperience } from './sortEntries'
+import { visibleSectionOrder } from './sectionOrder'
 import { pageContentWidth, pxToTwip } from './pageSize'
 import { dataUrlToBytes, PHOTO_DISPLAY_PX } from './photo'
 import {
@@ -37,19 +50,36 @@ function slugify(name: string): string {
   )
 }
 
-function displayLinkedIn(value: string): string {
-  return value
-    .replace(/^https?:\/\//, '')
-    .replace(/^(www\.)?linkedin\.com\//, '')
-}
-
-function displayWebsite(value: string): string {
-  return value.replace(/^https?:\/\//, '').replace(/\/$/, '')
-}
-
 type DocxCtx = {
   font: string
   sizes: DocxTypographyScale
+  /** Right edge of the text area, for right-aligned dates after a tab */
+  contentWidthTwip: number
+  /** PNG bytes for each contact icon on the contact line */
+  icons: Partial<Record<ContactItemKey, Uint8Array>>
+}
+
+/** Matches the preview's 11px contact icons. */
+const CONTACT_ICON_PX = 11
+
+/**
+ * Apple Pages ignores all direct paragraph formatting (alignment, spacing,
+ * borders, indents, tabs) unless the document declares a default paragraph
+ * style, which docx doesn't emit on its own.
+ */
+function normalParagraphStyle(): ImportedXmlComponent {
+  const style = new ImportedXmlComponent('w:style', {
+    'w:type': 'paragraph',
+    'w:default': '1',
+    'w:styleId': 'Normal',
+  })
+  style.push(new ImportedXmlComponent('w:name', { 'w:val': 'Normal' }))
+  style.push(new ImportedXmlComponent('w:qFormat'))
+  return style
+}
+
+function rightTab(ctx: DocxCtx) {
+  return [{ type: TabStopType.RIGHT, position: ctx.contentWidthTwip }]
 }
 
 function heading(text: string, ctx: DocxCtx): Paragraph {
@@ -96,7 +126,8 @@ function body(
 function bullet(text: string, ctx: DocxCtx): Paragraph {
   return new Paragraph({
     spacing: { after: 40 },
-    indent: { left: 360 },
+    // Hanging indent so wrapped lines align with the text, not the bullet
+    indent: { left: 540, hanging: 180 },
     children: [
       new TextRun({
         text: `• ${text}`,
@@ -108,21 +139,41 @@ function bullet(text: string, ctx: DocxCtx): Paragraph {
 }
 
 /**
- * With keepItemsTogether, spaces inside each item become non-breaking so
- * Word only wraps at the separators.
+ * Contact items with their icons and links, joined by separators. With
+ * keepItemsTogether, spaces inside each item become non-breaking so Word only
+ * wraps between items.
  */
-function contactLine(resume: ResumeData, keepItemsTogether = false): string {
-  const { contact } = resume
-  return [
-    contact.location,
-    contact.email,
-    contact.phone,
-    contact.linkedin ? displayLinkedIn(contact.linkedin) : '',
-    contact.website ? displayWebsite(contact.website) : '',
-  ]
-    .filter(Boolean)
-    .map((part) => (keepItemsTogether ? part.replace(/ /g, '\u00A0') : part))
-    .join('  |  ')
+function contactLineChildren(
+  resume: ResumeData,
+  ctx: DocxCtx,
+  keepItemsTogether = false,
+): ParagraphChild[] {
+  const keep = (text: string) =>
+    keepItemsTogether ? text.replace(/ /g, '\u00A0') : text
+  const run = (text: string) =>
+    new TextRun({ text, size: ctx.sizes.contactMeta, font: ctx.font })
+  // Links stay in the body text colour (no Hyperlink style) to match the preview
+  return contactLinks(resume.contact).flatMap((item, i) => {
+    const icon = ctx.icons[item.key]
+    const content: ParagraphChild[] = icon
+      ? [
+          new ImageRun({
+            type: 'png',
+            data: icon,
+            transformation: {
+              width: CONTACT_ICON_PX,
+              height: CONTACT_ICON_PX,
+            },
+          }),
+          run(keep(' ')),
+          run(keep(item.text)),
+        ]
+      : [run(keep(item.text))]
+    const nodes = item.href
+      ? [new ExternalHyperlink({ link: item.href, children: content })]
+      : content
+    return i === 0 ? nodes : [run('  |  '), ...nodes]
+  })
 }
 
 /** Borderless two-column row: name + contact left, square photo right. */
@@ -130,15 +181,15 @@ function buildContactWithPhoto(
   resume: ResumeData,
   ctx: DocxCtx,
   photo: Uint8Array,
-  contentWidthTwip: number,
 ): (Paragraph | Table)[] {
+  const contentWidthTwip = ctx.contentWidthTwip
   const photoColTwip = pxToTwip(PHOTO_DISPLAY_PX + 24)
   const textColTwip = contentWidthTwip - photoColTwip
-  const line = contactLine(resume, true)
+  const line = contactLineChildren(resume, ctx, true)
 
   const textChildren: Paragraph[] = [
     new Paragraph({
-      spacing: { after: line ? 80 : 0 },
+      spacing: { after: line.length > 0 ? 80 : 0 },
       children: [
         new TextRun({
           text: (resume.contact.fullName || 'Your Name').toUpperCase(),
@@ -149,18 +200,8 @@ function buildContactWithPhoto(
       ],
     }),
   ]
-  if (line) {
-    textChildren.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: line,
-            size: ctx.sizes.contactMeta,
-            font: ctx.font,
-          }),
-        ],
-      }),
-    )
+  if (line.length > 0) {
+    textChildren.push(new Paragraph({ children: line }))
   }
 
   return [
@@ -240,20 +281,13 @@ function buildContact(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
     }),
   ]
 
-  const line = contactLine(resume)
-
-  if (line) {
+  const line = contactLineChildren(resume, ctx)
+  if (line.length > 0) {
     paras.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
         spacing: { after: 120 },
-        children: [
-          new TextRun({
-            text: line,
-            size: ctx.sizes.contactMeta,
-            font: ctx.font,
-          }),
-        ],
+        children: line,
       }),
     )
   }
@@ -275,6 +309,7 @@ function buildExperience(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
     paras.push(
       new Paragraph({
         spacing: { before: 120, after: 0 },
+        tabStops: rightTab(ctx),
         children: [
           new TextRun({
             text: entry.role || 'Role',
@@ -347,6 +382,101 @@ function buildSkills(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
   ]
 }
 
+function buildCertifications(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
+  if (resume.certifications.length === 0) return []
+  const paras: Paragraph[] = [heading(SECTION_LABELS.certifications, ctx)]
+
+  for (const entry of sortCertifications(resume.certifications)) {
+    const date = formatMonthYear(entry.date)
+    paras.push(
+      new Paragraph({
+        spacing: { before: 60, after: 0 },
+        tabStops: rightTab(ctx),
+        children: [
+          new TextRun({
+            text: entry.name || 'Certification',
+            bold: true,
+            size: ctx.sizes.body,
+            font: ctx.font,
+          }),
+          ...(date
+            ? [
+                new TextRun({
+                  text: `\t${date}`,
+                  size: ctx.sizes.dates,
+                  font: ctx.font,
+                  color: '666666',
+                }),
+              ]
+            : []),
+        ],
+      }),
+    )
+    if (entry.issuer.trim()) paras.push(body(entry.issuer, ctx))
+  }
+
+  return paras
+}
+
+function buildReferences(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
+  if (resume.referencesOnRequest) {
+    return [
+      heading(SECTION_LABELS.references, ctx),
+      body(REFERENCES_ON_REQUEST_TEXT, ctx),
+    ]
+  }
+  if (resume.references.length === 0) return []
+  const paras: Paragraph[] = [heading(SECTION_LABELS.references, ctx)]
+
+  for (const entry of resume.references) {
+    paras.push(
+      new Paragraph({
+        spacing: { before: 120, after: 20 },
+        keepNext: true,
+        children: [
+          new TextRun({
+            text: entry.name || 'Reference',
+            bold: true,
+            size: ctx.sizes.roleTitle,
+            font: ctx.font,
+          }),
+        ],
+      }),
+    )
+    const role = referenceRole(entry)
+    if (role) paras.push(body(role, ctx))
+    if (entry.relationship.trim()) {
+      paras.push(body(entry.relationship, ctx, { size: ctx.sizes.details }))
+    }
+    const contacts = referenceContactItems(entry)
+    if (contacts.length > 0) {
+      const run = (text: string) =>
+        new TextRun({
+          text,
+          size: ctx.sizes.dates,
+          font: ctx.font,
+          color: '666666',
+        })
+      paras.push(
+        new Paragraph({
+          spacing: { after: 60 },
+          children: contacts.flatMap((item, i) => {
+            const node = item.href
+              ? new ExternalHyperlink({
+                  link: item.href,
+                  children: [run(item.text)],
+                })
+              : run(item.text)
+            return i === 0 ? [node] : [run('  |  '), node]
+          }),
+        }),
+      )
+    }
+  }
+
+  return paras
+}
+
 const BUILDERS: Record<
   Exclude<SectionId, 'contact'>,
   (resume: ResumeData, ctx: DocxCtx) => Paragraph[]
@@ -355,6 +485,8 @@ const BUILDERS: Record<
   experience: buildExperience,
   education: buildEducation,
   skills: buildSkills,
+  certifications: buildCertifications,
+  references: buildReferences,
 }
 
 export async function exportDocx(
@@ -362,26 +494,32 @@ export async function exportDocx(
   fileName: string,
   style: ResumeStyle = DEFAULT_RESUME_STYLE,
 ): Promise<void> {
+  const keys = [...new Set(contactLinks(resume.contact).map((item) => item.key))]
+  const pngs = await Promise.all(keys.map((key) => contactIconPng(key)))
   const ctx: DocxCtx = {
     font: getFontDocx(style.fontFamily),
     sizes: scaledDocxTypography(style.fontSize),
+    contentWidthTwip: pxToTwip(
+      pageContentWidth(style.margins.left, style.margins.right),
+    ),
+    icons: Object.fromEntries(keys.map((key, i) => [key, pngs[i]])),
   }
   const photo = resume.contact.photo
   const children: (Paragraph | Table)[] = photo
-    ? buildContactWithPhoto(
-        resume,
-        ctx,
-        await dataUrlToBytes(photo),
-        pxToTwip(pageContentWidth(style.margins.left, style.margins.right)),
-      )
+    ? buildContactWithPhoto(resume, ctx, await dataUrlToBytes(photo))
     : buildContact(resume, ctx)
 
-  for (const id of resume.sectionOrder) {
-    if (id === 'contact') continue
+  for (const id of visibleSectionOrder(resume)) {
     children.push(...BUILDERS[id](resume, ctx))
   }
 
   const doc = new Document({
+    styles: {
+      importedStyles: [
+        new DocumentDefaults({ run: { font: ctx.font, size: ctx.sizes.body } }),
+        normalParagraphStyle(),
+      ],
+    },
     sections: [
       {
         properties: {
