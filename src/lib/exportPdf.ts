@@ -26,6 +26,12 @@ import {
   scaledTypography,
   type TypographyScale,
 } from './typography'
+import {
+  fitParams,
+  getSpacing,
+  searchFit,
+  type DensitySpacing,
+} from './density'
 
 const PAGE_WIDTH_MM = 210
 const PAGE_HEIGHT_MM = 297
@@ -33,12 +39,8 @@ const PX_PER_INCH = 96
 const MM_PER_INCH = 25.4
 const PT_PER_PX = 72 / PX_PER_INCH
 
-const SECTION_GAP_MM = pxToMm(18)
-const ENTRY_GAP_MM = pxToMm(14)
-const TIGHT_GAP_MM = pxToMm(2)
-const ITEM_GAP_MM = pxToMm(6)
-const HEADING_AFTER_MM = pxToMm(8)
 const RULE_WIDTH_MM = 0.25
+const BODY_COLOR: [number, number, number] = [63, 63, 70]
 
 function slugify(name: string): string {
   return (
@@ -68,6 +70,8 @@ type PdfWriter = {
   doc: jsPDF
   font: PdfFont
   sizes: TypographyScale
+  spacing: DensitySpacing
+  compact: boolean
   left: number
   right: number
   top: number
@@ -76,8 +80,9 @@ type PdfWriter = {
   y: number
 }
 
-function createWriter(style: ResumeStyle): PdfWriter {
-  const sizes = scaledTypography(style.fontSize)
+function createWriter(style: ResumeStyle, fitT: number): PdfWriter {
+  const fit = fitParams(fitT, scaledTypography(style.fontSize).body)
+  const sizes = scaledTypography(style.fontSize, fit.fontScale)
   const left = pxToMm(style.margins.left)
   const right = PAGE_WIDTH_MM - pxToMm(style.margins.right)
   const top = pxToMm(style.margins.top)
@@ -92,6 +97,8 @@ function createWriter(style: ResumeStyle): PdfWriter {
     }),
     font: getFontPdf(style.fontFamily),
     sizes,
+    spacing: getSpacing(style.density, fit.spacingScale),
+    compact: style.density === 'compact',
     left,
     right,
     top,
@@ -129,11 +136,11 @@ function ensureSpace(w: PdfWriter, needed: number) {
   w.y = w.top
 }
 
-function drawRule(w: PdfWriter) {
+function drawRule(w: PdfWriter, afterPx = 6) {
   w.doc.setDrawColor(39, 39, 42)
   w.doc.setLineWidth(RULE_WIDTH_MM)
   w.doc.line(w.left, w.y, w.right, w.y)
-  w.y += pxToMm(6)
+  w.y += pxToMm(afterPx)
 }
 
 function wrap(w: PdfWriter, text: string, maxWidth = w.width): string[] {
@@ -181,12 +188,12 @@ function writeWrapped(
 }
 
 function writeBullet(w: PdfWriter, text: string) {
-  const indent = pxToMm(14)
-  setStyle(w, { size: w.sizes.body, color: [63, 63, 70] })
+  const indent = pxToMm(w.compact ? 10 : 14)
+  setStyle(w, { size: w.sizes.body, color: BODY_COLOR })
   const marker = '• '
   const markerWidth = w.doc.getTextWidth(marker)
   const lines = wrap(w, text, w.width - indent - markerWidth)
-  const lh = lineHeightMm(w.sizes.body, 1.4)
+  const lh = lineHeightMm(w.sizes.body, w.spacing.bulletLeading)
   const ascent = pxToMm(w.sizes.body)
 
   lines.forEach((line, i) => {
@@ -224,8 +231,104 @@ function writeTitleWithDate(
   if (lines.length > 1) writeLines(w, lines.slice(1), titleOpts)
 }
 
+type LineOpts = Parameters<typeof writeLines>[2]
+
+/**
+ * Compact row: left text (wrapped) with right text on the first line's
+ * baseline, e.g. company + location. Right text is skipped when empty.
+ */
+function writeSplitRow(
+  w: PdfWriter,
+  left: string,
+  leftOpts: LineOpts,
+  right: string,
+) {
+  const rightText = toWinAnsi(right)
+  setStyle(w, { size: w.sizes.dates, color: DATE_COLOR })
+  const rightWidth = rightText ? w.doc.getTextWidth(rightText) + 3 : 0
+  setStyle(w, leftOpts)
+  const lines = wrap(w, left, Math.max(40, w.width - rightWidth))
+  const leading = leftOpts.leading ?? 1.45
+
+  writeLines(w, lines.slice(0, 1), leftOpts)
+  if (rightText) {
+    const baseline =
+      w.y - lineHeightMm(leftOpts.size, leading) + pxToMm(leftOpts.size) * 0.85
+    setStyle(w, { size: w.sizes.dates, color: DATE_COLOR })
+    w.doc.text(rightText, w.right, baseline, { align: 'right' })
+  }
+  if (lines.length > 1) writeLines(w, lines.slice(1), leftOpts)
+}
+
+/**
+ * Compact row: bold lead, normal rest ("Degree · School") and right-aligned
+ * date on one line. Falls back to two rows when it doesn't fit.
+ */
+function writeLeadRow(
+  w: PdfWriter,
+  lead: string,
+  rest: string,
+  right: string,
+  leadSize: number,
+) {
+  const leading = w.spacing.bodyLeading
+  const leadOpts = { size: leadSize, bold: true, color: TITLE_COLOR, leading }
+  const restOpts = { size: w.sizes.body, color: BODY_COLOR, leading }
+  const leadText = toWinAnsi(lead)
+  const restText = rest ? toWinAnsi(`  ·  ${rest}`) : ''
+  const rightText = toWinAnsi(right)
+
+  setStyle(w, { size: w.sizes.dates, color: DATE_COLOR })
+  const rightWidth = rightText ? w.doc.getTextWidth(rightText) + 3 : 0
+  setStyle(w, leadOpts)
+  const leadWidth = w.doc.getTextWidth(leadText)
+  setStyle(w, restOpts)
+  const restWidth = w.doc.getTextWidth(restText)
+
+  if (leadWidth + restWidth > w.width - rightWidth) {
+    writeSplitRow(w, lead, leadOpts, right)
+    if (rest) writeWrapped(w, rest, restOpts)
+    return
+  }
+
+  const lh = lineHeightMm(leadSize, leading)
+  ensureSpace(w, lh)
+  const baseline = w.y + pxToMm(leadSize) * 0.85
+  setStyle(w, leadOpts)
+  w.doc.text(leadText, w.left, baseline)
+  if (restText) {
+    setStyle(w, restOpts)
+    w.doc.text(restText, w.left + leadWidth, baseline)
+  }
+  if (rightText) {
+    setStyle(w, { size: w.sizes.dates, color: DATE_COLOR })
+    w.doc.text(rightText, w.right, baseline, { align: 'right' })
+  }
+  w.y += lh
+}
+
+/** Bold "Label: " prefix followed by normal text, wrapped as one paragraph. */
+function writeLabelled(w: PdfWriter, label: string, rest: string, opts: LineOpts) {
+  const lh = lineHeightMm(opts.size, opts.leading ?? 1.45)
+  const labelText = toWinAnsi(label)
+  setStyle(w, { ...opts, bold: true, color: TITLE_COLOR })
+  const labelWidth = w.doc.getTextWidth(labelText)
+  setStyle(w, opts)
+  const first = wrap(w, rest, Math.max(20, w.width - labelWidth))[0] ?? ''
+  const remaining = toWinAnsi(rest).slice(first.length).trim()
+
+  ensureSpace(w, lh)
+  const baseline = w.y + pxToMm(opts.size) * 0.85
+  setStyle(w, { ...opts, bold: true, color: TITLE_COLOR })
+  w.doc.text(labelText, w.left, baseline)
+  setStyle(w, opts)
+  w.doc.text(first, w.left + labelWidth, baseline)
+  w.y += lh
+  if (remaining) writeLines(w, wrap(w, remaining), opts)
+}
+
 function heading(w: PdfWriter, text: string) {
-  w.y += SECTION_GAP_MM
+  w.y += pxToMm(w.spacing.sectionGap)
   writeLines(w, [text.toUpperCase()], {
     size: w.sizes.sectionHeading,
     bold: true,
@@ -233,8 +336,11 @@ function heading(w: PdfWriter, text: string) {
     leading: 1.2,
   })
   w.y += pxToMm(3)
-  drawRule(w)
-  w.y += HEADING_AFTER_MM - pxToMm(6)
+  drawRule(w, w.spacing.headingAfter)
+}
+
+function contactLeading(w: PdfWriter): number {
+  return w.compact ? 1.3 : 1.4
 }
 
 /** Name and contact on the left, square photo on the right edge. */
@@ -249,11 +355,12 @@ function buildContactWithPhoto(
   const name = (resume.contact.fullName || 'Your Name').toUpperCase()
 
   const nameOpts = {
-    size: w.sizes.name,
+    size: w.sizes.name * w.spacing.nameScale,
     bold: true,
     color: [24, 24, 27] as [number, number, number],
     leading: 1.15,
   }
+  const beforeContact = pxToMm(w.compact ? 2 : 4)
 
   setStyle(w, nameOpts)
   const nameLines = wrap(w, name, textWidth)
@@ -262,20 +369,21 @@ function buildContactWithPhoto(
   const textHeight =
     nameLines.length * lineHeightMm(nameOpts.size, nameOpts.leading) +
     (contactLines.length > 0
-      ? pxToMm(4) + contactLines.length * lineHeightMm(w.sizes.contactMeta, 1.4)
+      ? beforeContact +
+        contactLines.length * lineHeightMm(w.sizes.contactMeta, contactLeading(w))
       : 0)
 
   w.y = top + Math.max(0, (photoMm - textHeight) / 2)
   writeLines(w, nameLines, nameOpts)
   if (contactLines.length > 0) {
-    w.y += pxToMm(4)
+    w.y += beforeContact
     drawContactLines(w, contactLines, w.left)
   }
 
   w.doc.addImage(photo, 'JPEG', w.right - photoMm, top, photoMm, photoMm)
   w.y = Math.max(w.y, top + photoMm)
 
-  w.y += pxToMm(8)
+  w.y += pxToMm(w.compact ? 4 : 8)
   drawRule(w)
 }
 
@@ -286,7 +394,7 @@ function buildContact(w: PdfWriter, resume: ResumeData) {
     return
   }
   writeLines(w, [(contact.fullName || 'Your Name').toUpperCase()], {
-    size: w.sizes.name,
+    size: w.sizes.name * w.spacing.nameScale,
     bold: true,
     color: [24, 24, 27],
     align: 'center',
@@ -295,11 +403,11 @@ function buildContact(w: PdfWriter, resume: ResumeData) {
 
   const items = contactLinks(contact)
   if (items.length > 0) {
-    w.y += pxToMm(4)
+    w.y += pxToMm(w.compact ? 2 : 4)
     writeContactLine(w, items)
   }
 
-  w.y += pxToMm(8)
+  w.y += pxToMm(w.compact ? 4 : 8)
   drawRule(w)
 }
 
@@ -347,7 +455,9 @@ function layoutContactLine(
 ): ContactSegment[][] {
   setStyle(w, { size: w.sizes.contactMeta, color: [82, 82, 91] })
   const sepWidth = w.doc.getTextWidth(CONTACT_SEP)
-  const iconWidth = CONTACT_ICON_MM + CONTACT_ICON_GAP_MM
+  // Compact mode drops the icons, matching the preview's plain text line
+  const showIcons = !w.compact
+  const iconWidth = showIcons ? CONTACT_ICON_MM + CONTACT_ICON_GAP_MM : 0
   const measure = (
     text: string,
     href?: string,
@@ -369,7 +479,11 @@ function layoutContactLine(
   }
 
   for (const item of items) {
-    const seg = measure(toWinAnsi(item.text), item.href, item.key)
+    const seg = measure(
+      toWinAnsi(item.text),
+      item.href,
+      showIcons ? item.key : undefined,
+    )
     if (seg.width > maxWidth) {
       flush()
       wrap(w, seg.text, maxWidth - iconWidth).forEach((piece, i) => {
@@ -401,7 +515,7 @@ function drawContactLines(
   setStyle(w, { size, color: [82, 82, 91] })
   const sepWidth = w.doc.getTextWidth(CONTACT_SEP)
   const iconWidth = CONTACT_ICON_MM + CONTACT_ICON_GAP_MM
-  const lh = lineHeightMm(size, 1.4)
+  const lh = lineHeightMm(size, contactLeading(w))
   const ascent = pxToMm(size)
   for (const line of lines) {
     ensureSpace(w, lh)
@@ -438,8 +552,8 @@ function buildSummary(w: PdfWriter, resume: ResumeData) {
   heading(w, SECTION_LABELS.summary)
   writeWrapped(w, resume.summary, {
     size: w.sizes.body,
-    color: [63, 63, 70],
-    leading: 1.45,
+    color: BODY_COLOR,
+    leading: w.spacing.bodyLeading,
   })
 }
 
@@ -448,8 +562,30 @@ function buildExperience(w: PdfWriter, resume: ResumeData) {
   heading(w, SECTION_LABELS.experience)
 
   for (const entry of sortExperience(resume.experience)) {
-    w.y += ENTRY_GAP_MM
+    w.y += pxToMm(w.spacing.entryGap)
     const dates = formatDateRange(entry.startDate, entry.endDate, entry.current)
+
+    if (w.compact) {
+      const leading = w.spacing.bodyLeading
+      writeTitleWithDate(w, entry.role || 'Role', dates, {
+        size: w.sizes.roleTitle,
+        leading,
+      })
+      if (entry.company || entry.location) {
+        writeSplitRow(
+          w,
+          entry.company,
+          { size: w.sizes.body, italic: true, color: BODY_COLOR, leading },
+          entry.location,
+        )
+      }
+      for (const bullet of entry.bullets.map((b) => b.trim()).filter(Boolean)) {
+        w.y += pxToMm(w.spacing.bulletGap)
+        writeBullet(w, bullet)
+      }
+      continue
+    }
+
     writeTitleWithDate(w, entry.role || 'Role', dates, {
       size: w.sizes.roleTitle,
       leading: 1.25,
@@ -471,7 +607,7 @@ function buildExperience(w: PdfWriter, resume: ResumeData) {
     }
 
     for (const bullet of entry.bullets.map((b) => b.trim()).filter(Boolean)) {
-      w.y += TIGHT_GAP_MM
+      w.y += pxToMm(w.spacing.bulletGap)
       writeBullet(w, bullet)
     }
   }
@@ -482,7 +618,25 @@ function buildEducation(w: PdfWriter, resume: ResumeData) {
   heading(w, SECTION_LABELS.education)
 
   for (const entry of sortEducation(resume.education)) {
-    w.y += ENTRY_GAP_MM
+    w.y += pxToMm(w.spacing.entryGap)
+    if (w.compact) {
+      const place = [entry.school, entry.location].filter(Boolean).join(', ')
+      writeLeadRow(
+        w,
+        entry.degree || 'Degree',
+        place,
+        formatYearRange(entry.startDate, entry.endDate),
+        w.sizes.roleTitle,
+      )
+      if (entry.details.trim()) {
+        writeWrapped(w, entry.details, {
+          size: w.sizes.details,
+          color: [82, 82, 91],
+          leading: w.spacing.bodyLeading,
+        })
+      }
+      continue
+    }
     writeWrapped(w, entry.degree || 'Degree', {
       size: w.sizes.roleTitle,
       bold: true,
@@ -512,13 +666,16 @@ function buildSkills(w: PdfWriter, resume: ResumeData) {
   const skills = resume.skills.map((s) => s.trim()).filter(Boolean)
   if (skills.length === 0) return
   heading(w, SECTION_LABELS.skills)
+  const opts = {
+    size: w.sizes.body,
+    color: BODY_COLOR,
+    leading: w.spacing.bodyLeading,
+  }
   for (const line of skills) {
-    w.y += TIGHT_GAP_MM
-    writeWrapped(w, line, {
-      size: w.sizes.body,
-      color: [63, 63, 70],
-      leading: 1.45,
-    })
+    w.y += pxToMm(w.spacing.skillGap)
+    const labelled = w.compact ? /^([^:]{1,40}):\s*(.+)$/.exec(line) : null
+    if (labelled) writeLabelled(w, `${labelled[1]}: `, labelled[2], opts)
+    else writeWrapped(w, line, opts)
   }
 }
 
@@ -526,7 +683,17 @@ function buildCertifications(w: PdfWriter, resume: ResumeData) {
   if (resume.certifications.length === 0) return
   heading(w, SECTION_LABELS.certifications)
   for (const entry of sortCertifications(resume.certifications)) {
-    w.y += ITEM_GAP_MM
+    w.y += pxToMm(w.spacing.itemGap)
+    if (w.compact) {
+      writeLeadRow(
+        w,
+        entry.name || 'Certification',
+        entry.issuer.trim(),
+        formatMonthYear(entry.date),
+        w.sizes.body,
+      )
+      continue
+    }
     writeTitleWithDate(w, entry.name || 'Certification', formatMonthYear(entry.date), {
       size: w.sizes.body,
       leading: 1.3,
@@ -578,11 +745,11 @@ function writeReferenceContacts(w: PdfWriter, items: ReferenceContactItem[]) {
 function buildReferences(w: PdfWriter, resume: ResumeData) {
   if (resume.referencesOnRequest) {
     heading(w, SECTION_LABELS.references)
-    w.y += ITEM_GAP_MM
+    w.y += pxToMm(w.spacing.itemGap)
     writeWrapped(w, REFERENCES_ON_REQUEST_TEXT, {
       size: w.sizes.body,
-      color: [63, 63, 70],
-      leading: 1.45,
+      color: BODY_COLOR,
+      leading: w.spacing.bodyLeading,
     })
     return
   }
@@ -590,7 +757,7 @@ function buildReferences(w: PdfWriter, resume: ResumeData) {
   heading(w, SECTION_LABELS.references)
 
   for (const entry of resume.references) {
-    w.y += ENTRY_GAP_MM
+    w.y += pxToMm(w.spacing.entryGap)
     const role = referenceRole(entry)
     const relationship = entry.relationship.trim()
     const contacts = referenceContactItems(entry)
@@ -603,13 +770,17 @@ function buildReferences(w: PdfWriter, resume: ResumeData) {
         (contacts.length > 0 ? lineHeightMm(w.sizes.dates, 1.4) : 0),
     )
 
-    writeWrapped(w, entry.name || 'Reference', {
-      size: w.sizes.roleTitle,
-      bold: true,
-      color: TITLE_COLOR,
-      leading: 1.3,
-    })
-    if (role) {
+    if (w.compact) {
+      writeLeadRow(w, entry.name || 'Reference', role, '', w.sizes.roleTitle)
+    } else {
+      writeWrapped(w, entry.name || 'Reference', {
+        size: w.sizes.roleTitle,
+        bold: true,
+        color: TITLE_COLOR,
+        leading: 1.3,
+      })
+    }
+    if (role && !w.compact) {
       writeWrapped(w, role, {
         size: w.sizes.body,
         color: [63, 63, 70],
@@ -642,8 +813,9 @@ const BUILDERS: Record<
 export function buildResumePdf(
   resume: ResumeData,
   style: ResumeStyle = DEFAULT_RESUME_STYLE,
+  fitT = 0,
 ): jsPDF {
-  const w = createWriter(style)
+  const w = createWriter(style, fitT)
   buildContact(w, resume)
   for (const id of visibleSectionOrder(resume)) {
     BUILDERS[id](w, resume)
@@ -651,11 +823,22 @@ export function buildResumePdf(
   return w.doc
 }
 
+/**
+ * Smallest fit level at which the PDF is one page, measured with jsPDF's own
+ * text metrics. Also used as the DOCX fit level, since Word can't be measured.
+ */
+export function findPdfFitT(resume: ResumeData, style: ResumeStyle): number {
+  return searchFit(
+    (t) => buildResumePdf(resume, style, t).getNumberOfPages() <= 1,
+  ).t
+}
+
 export async function exportPdf(
   resume: ResumeData,
   fileName: string,
   style: ResumeStyle = DEFAULT_RESUME_STYLE,
 ): Promise<void> {
-  const pdf = buildResumePdf(resume, style)
+  const fitT = style.fitToPage ? findPdfFitT(resume, style) : 0
+  const pdf = buildResumePdf(resume, style, fitT)
   pdf.save(`${slugify(fileName)}.pdf`)
 }

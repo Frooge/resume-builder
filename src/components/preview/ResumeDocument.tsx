@@ -42,7 +42,18 @@ import {
   pageContentHeight,
   pageContentWidth,
 } from '../../lib/pageSize'
-import { typographyCssVars, normalizeResumeStyle } from '../../lib/typography'
+import {
+  typographyCssVars,
+  normalizeResumeStyle,
+  scaledTypography,
+} from '../../lib/typography'
+import {
+  fitParams,
+  getSpacing,
+  NO_FIT,
+  searchFit,
+  type DensitySpacing,
+} from '../../lib/density'
 import { PHOTO_DISPLAY_PX } from '../../lib/photo'
 import { SectionChrome } from './SectionChrome'
 
@@ -52,11 +63,8 @@ interface ResumeDocumentProps {
   onEditSection: (id: SectionId) => void
 }
 
-const SECTION_GAP_PX = 18
-const ENTRY_GAP_PX = 14
-const BULLET_GAP_PX = 2
-const SKILL_GAP_PX = 2
-const ITEM_GAP_PX = 6
+/** Compact mode keeps a little air between a section rule and its content. */
+const COMPACT_MIN_GAP_AFTER_HEADING_PX = 3
 
 type FlowUnit =
   | { key: string; sectionId: SectionId; kind: 'contact' }
@@ -172,7 +180,47 @@ function ContactItem({
   )
 }
 
-function ContactBlock({ resume }: { resume: ResumeData }) {
+/** Compact contact line: plain text separated by pipes, links kept. */
+function CompactContactLine({
+  items,
+  hasPhoto,
+}: {
+  items: ReturnType<typeof contactLinks>
+  hasPhoto: boolean
+}) {
+  return (
+    <p
+      className={`mt-0.5 font-normal leading-snug text-zinc-600 ${hasPhoto ? 'text-left' : 'text-center'}`}
+      style={{ fontSize: 'var(--fs-contact-meta)' }}
+    >
+      {items.map((item, i) => (
+        <span key={item.key}>
+          {i > 0 ? ' \u00a0|\u00a0 ' : null}
+          {item.href ? (
+            <a
+              href={item.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-inherit no-underline"
+            >
+              {item.text}
+            </a>
+          ) : (
+            item.text
+          )}
+        </span>
+      ))}
+    </p>
+  )
+}
+
+function ContactBlock({
+  resume,
+  compact,
+}: {
+  resume: ResumeData
+  compact: boolean
+}) {
   const { contact } = resume
   const items = contactLinks(contact)
 
@@ -185,7 +233,9 @@ function ContactBlock({ resume }: { resume: ResumeData }) {
       >
         {contact.fullName || 'Your Name'}
       </h1>
-      {items.length > 0 ? (
+      {items.length > 0 && compact ? (
+        <CompactContactLine items={items} hasPhoto={hasPhoto} />
+      ) : items.length > 0 ? (
         <p
           className={`mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-normal leading-relaxed text-zinc-600 ${hasPhoto ? 'justify-start' : 'justify-center'}`}
           style={{ fontSize: 'var(--fs-contact-meta)' }}
@@ -212,7 +262,9 @@ function ContactBlock({ resume }: { resume: ResumeData }) {
 
   if (!hasPhoto) {
     return (
-      <header className="border-b border-zinc-800 pb-3 text-center">
+      <header
+        className={`border-b border-zinc-800 text-center ${compact ? 'pb-1.5' : 'pb-3'}`}
+      >
         {text}
       </header>
     )
@@ -221,7 +273,9 @@ function ContactBlock({ resume }: { resume: ResumeData }) {
   // Fixed photo size keeps the off-screen height measurement stable
   // before the image decodes.
   return (
-    <header className="flex items-center gap-6 border-b border-zinc-800 pb-3">
+    <header
+      className={`flex items-center gap-6 border-b border-zinc-800 ${compact ? 'pb-1.5' : 'pb-3'}`}
+    >
       <div className="min-w-0 flex-1 text-left">{text}</div>
       <img
         src={contact.photo}
@@ -255,12 +309,15 @@ function SectionHeading({
 
 function SummaryBlock({ resume }: { resume: ResumeData }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section
+      className="flex flex-col"
+      style={{ gap: 'var(--gap-heading-after)' }}
+    >
       <SectionHeading>{SECTION_LABELS.summary}</SectionHeading>
       {resume.summary.trim() ? (
         <p
-          className="font-normal leading-[1.45] text-zinc-700 text-justify"
-          style={{ fontSize: 'var(--fs-body)' }}
+          className="font-normal text-zinc-700 text-justify"
+          style={{ fontSize: 'var(--fs-body)', lineHeight: 'var(--lh-body)' }}
         >
           {resume.summary}
         </p>
@@ -276,18 +333,95 @@ function SummaryBlock({ resume }: { resume: ResumeData }) {
   )
 }
 
-function SkillsLine({ line }: { line: string }) {
+/** Splits "Languages: TypeScript, Go" into label and rest; null if no label. */
+function splitSkillLabel(line: string): [string, string] | null {
+  const m = /^([^:]{1,40}):\s*(.+)$/.exec(line)
+  return m ? [m[1], m[2]] : null
+}
+
+function SkillsLine({ line, compact }: { line: string; compact: boolean }) {
+  const labelled = compact ? splitSkillLabel(line) : null
   return (
     <p
-      className="font-normal leading-[1.45] text-zinc-700"
-      style={{ fontSize: 'var(--fs-body)' }}
+      className="font-normal text-zinc-700"
+      style={{ fontSize: 'var(--fs-body)', lineHeight: 'var(--lh-body)' }}
     >
-      {line}
+      {labelled ? (
+        <>
+          <span className="font-semibold text-zinc-900">{labelled[0]}:</span>{' '}
+          {labelled[1]}
+        </>
+      ) : (
+        line
+      )}
     </p>
   )
 }
 
-function ExperienceHeaderBlock({ entry }: { entry: ExperienceEntry }) {
+function SplitRow({
+  left,
+  right,
+  className,
+  style,
+  rightStyle,
+}: {
+  left: ReactNode
+  right?: string
+  className: string
+  style: CSSProperties
+  rightStyle: CSSProperties
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <p className={`min-w-0 ${className}`} style={style}>
+        {left}
+      </p>
+      {right ? (
+        <p
+          className="shrink-0 font-normal text-zinc-500"
+          style={rightStyle}
+        >
+          {right}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function CompactExperienceHeaderBlock({ entry }: { entry: ExperienceEntry }) {
+  const dates = formatDateRange(entry.startDate, entry.endDate, entry.current)
+  const datesStyle = { fontSize: 'var(--fs-dates)' }
+
+  return (
+    <div style={{ lineHeight: 'var(--lh-body)' }}>
+      <SplitRow
+        left={entry.role || 'Role'}
+        right={dates}
+        className="font-semibold text-zinc-900"
+        style={{ fontSize: 'var(--fs-role-title)' }}
+        rightStyle={datesStyle}
+      />
+      {entry.company || entry.location ? (
+        <SplitRow
+          left={entry.company}
+          right={entry.location}
+          className="font-normal italic text-zinc-700"
+          style={{ fontSize: 'var(--fs-body)' }}
+          rightStyle={datesStyle}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function ExperienceHeaderBlock({
+  entry,
+  compact,
+}: {
+  entry: ExperienceEntry
+  compact: boolean
+}) {
+  if (compact) return <CompactExperienceHeaderBlock entry={entry} />
   const dates = formatDateRange(entry.startDate, entry.endDate, entry.current)
 
   return (
@@ -328,12 +462,18 @@ function ExperienceHeaderBlock({ entry }: { entry: ExperienceEntry }) {
   )
 }
 
-function ExperienceBullet({ bullet }: { bullet: string }) {
+function ExperienceBullet({
+  bullet,
+  spacing,
+}: {
+  bullet: string
+  spacing: DensitySpacing
+}) {
   return (
-    <ul className="list-disc pl-[18px]">
+    <ul className="list-disc" style={{ paddingLeft: spacing.bulletIndent }}>
       <li
-        className="font-normal leading-[1.4] text-zinc-700"
-        style={{ fontSize: 'var(--fs-body)' }}
+        className="font-normal text-zinc-700"
+        style={{ fontSize: 'var(--fs-body)', lineHeight: 'var(--lh-bullet)' }}
       >
         {bullet}
       </li>
@@ -341,7 +481,49 @@ function ExperienceBullet({ bullet }: { bullet: string }) {
   )
 }
 
-function EducationEntryBlock({ entry }: { entry: EducationEntry }) {
+function CompactEducationEntryBlock({ entry }: { entry: EducationEntry }) {
+  const years = formatYearRange(entry.startDate, entry.endDate)
+  const place = [entry.school, entry.location].filter(Boolean).join(', ')
+
+  return (
+    <div style={{ lineHeight: 'var(--lh-body)' }}>
+      <SplitRow
+        left={
+          <>
+            <span
+              className="font-semibold text-zinc-900"
+              style={{ fontSize: 'var(--fs-role-title)' }}
+            >
+              {entry.degree || 'Degree'}
+            </span>
+            {place ? <span> · {place}</span> : null}
+          </>
+        }
+        right={years}
+        className="font-normal text-zinc-700"
+        style={{ fontSize: 'var(--fs-body)' }}
+        rightStyle={{ fontSize: 'var(--fs-dates)' }}
+      />
+      {entry.details.trim() ? (
+        <p
+          className="font-normal text-zinc-600"
+          style={{ fontSize: 'var(--fs-details)' }}
+        >
+          {entry.details}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function EducationEntryBlock({
+  entry,
+  compact,
+}: {
+  entry: EducationEntry
+  compact: boolean
+}) {
+  if (compact) return <CompactEducationEntryBlock entry={entry} />
   const years = formatYearRange(entry.startDate, entry.endDate)
   const meta = [entry.school, entry.location, years].filter(Boolean).join(' • ')
 
@@ -373,8 +555,36 @@ function EducationEntryBlock({ entry }: { entry: EducationEntry }) {
   )
 }
 
-function CertificationEntryBlock({ entry }: { entry: CertificationEntry }) {
+function CertificationEntryBlock({
+  entry,
+  compact,
+}: {
+  entry: CertificationEntry
+  compact: boolean
+}) {
   const date = formatMonthYear(entry.date)
+
+  if (compact) {
+    const issuer = entry.issuer.trim()
+    return (
+      <div style={{ lineHeight: 'var(--lh-body)' }}>
+        <SplitRow
+          left={
+            <>
+              <span className="font-semibold text-zinc-900">
+                {entry.name || 'Certification'}
+              </span>
+              {issuer ? <span> · {issuer}</span> : null}
+            </>
+          }
+          right={date}
+          className="font-normal text-zinc-700"
+          style={{ fontSize: 'var(--fs-body)' }}
+          rightStyle={{ fontSize: 'var(--fs-dates)' }}
+        />
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -406,19 +616,34 @@ function CertificationEntryBlock({ entry }: { entry: CertificationEntry }) {
   )
 }
 
-function ReferenceEntryBlock({ entry }: { entry: ReferenceEntry }) {
+function ReferenceEntryBlock({
+  entry,
+  compact,
+}: {
+  entry: ReferenceEntry
+  compact: boolean
+}) {
   const role = referenceRole(entry)
   const contacts = referenceContactItems(entry)
 
   return (
-    <div>
+    <div style={compact ? { lineHeight: 'var(--lh-body)' } : undefined}>
       <p
         className="font-semibold text-zinc-900"
         style={{ fontSize: 'var(--fs-role-title)' }}
       >
         {entry.name || 'Reference'}
+        {compact && role ? (
+          <span
+            className="font-normal text-zinc-700"
+            style={{ fontSize: 'var(--fs-body)' }}
+          >
+            {' '}
+            · {role}
+          </span>
+        ) : null}
       </p>
-      {role ? (
+      {role && !compact ? (
         <p
           className="font-normal leading-[1.4] text-zinc-700"
           style={{ fontSize: 'var(--fs-body)' }}
@@ -620,16 +845,14 @@ function buildFlowUnits(resume: ResumeData): FlowUnit[] {
   return units
 }
 
-function gapBefore(unit: FlowUnit, page: FlowUnit[]): number {
-  if (page.length === 0) return 0
-
-  if (unit.kind === 'experience-bullet') return BULLET_GAP_PX
-  if (unit.kind === 'skills-line') return SKILL_GAP_PX
+function baseGap(unit: FlowUnit, spacing: DensitySpacing): number {
+  if (unit.kind === 'experience-bullet') return spacing.bulletGap
+  if (unit.kind === 'skills-line') return spacing.skillGap
   if (
     unit.kind === 'certifications-entry' ||
     unit.kind === 'references-on-request'
   ) {
-    return ITEM_GAP_PX
+    return spacing.itemGap
   }
 
   if (
@@ -640,17 +863,41 @@ function gapBefore(unit: FlowUnit, page: FlowUnit[]): number {
     unit.kind === 'references-entry' ||
     unit.kind === 'references-empty'
   ) {
-    return ENTRY_GAP_PX
+    return spacing.entryGap
   }
 
-  return SECTION_GAP_PX
+  return spacing.sectionGap
+}
+
+function isHeading(unit: FlowUnit): boolean {
+  return unit.kind.endsWith('-heading')
+}
+
+function gapBefore(
+  unit: FlowUnit,
+  page: FlowUnit[],
+  spacing: DensitySpacing,
+  compact: boolean,
+): number {
+  const prev = page[page.length - 1]
+  if (!prev) return 0
+  const gap = baseGap(unit, spacing)
+  if (compact && isHeading(prev)) {
+    return Math.max(gap, COMPACT_MIN_GAP_AFTER_HEADING_PX)
+  }
+  return gap
 }
 
 function packUnits(
   units: FlowUnit[],
   heights: Record<string, number>,
   maxHeight: number,
+  spacing: DensitySpacing,
+  compact: boolean,
 ): FlowUnit[][] {
+  const gapFor = (unit: FlowUnit, page: FlowUnit[]) =>
+    gapBefore(unit, page, spacing, compact)
+
   // Until measured, keep a single page to avoid wrong multi-page flashes
   if (units.length > 0 && Object.keys(heights).length === 0) {
     return [units]
@@ -739,7 +986,7 @@ function packUnits(
             ...headerUnit,
             key: `${headerKey}-cont-${pages.length}`,
           }
-          const hg = gapBefore(contHeader, current)
+          const hg = gapFor(contHeader, current)
           current.push(contHeader)
           used += hg + heightOf(headerKey)
         }
@@ -758,7 +1005,7 @@ function packUnits(
   for (let i = 0; i < units.length; i++) {
     const unit = units[i]
     const h = heightOf(unit.key)
-    const gap = gapBefore(unit, current)
+    const gap = gapFor(unit, current)
     let needed = gap + h
 
     // Keep job header with at least the next bullet when possible
@@ -766,7 +1013,7 @@ function packUnits(
       const next = units[i + 1]
       if (next?.kind === 'experience-bullet' && next.entryId === unit.entry.id) {
         const pairExtra =
-          gapBefore(next, [...current, unit]) + heightOf(next.key)
+          gapFor(next, [...current, unit]) + heightOf(next.key)
         // Only keep them together when the pair fits on a fresh page
         if (h + pairExtra <= limit) {
           needed += pairExtra
@@ -778,7 +1025,7 @@ function packUnits(
       startNewPageFor(unit)
     }
 
-    const g = gapBefore(unit, current)
+    const g = gapFor(unit, current)
     used += g + h
     current.push(unit)
   }
@@ -832,16 +1079,23 @@ function PageShell({
   )
 }
 
-function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
+type RenderCtx = {
+  resume: ResumeData
+  compact: boolean
+  spacing: DensitySpacing
+}
+
+function renderUnit(unit: FlowUnit, ctx: RenderCtx): ReactNode {
+  const { resume, compact, spacing } = ctx
   switch (unit.kind) {
     case 'contact':
-      return <ContactBlock resume={resume} />
+      return <ContactBlock resume={resume} compact={compact} />
     case 'summary':
       return <SummaryBlock resume={resume} />
     case 'skills-heading':
       return <SectionHeading>{SECTION_LABELS.skills}</SectionHeading>
     case 'skills-line':
-      return <SkillsLine line={unit.line} />
+      return <SkillsLine line={unit.line} compact={compact} />
     case 'skills-empty':
       return (
         <p
@@ -858,7 +1112,7 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
         </SectionHeading>
       )
     case 'certifications-entry':
-      return <CertificationEntryBlock entry={unit.entry} />
+      return <CertificationEntryBlock entry={unit.entry} compact={compact} />
     case 'certifications-empty':
       return (
         <p
@@ -875,12 +1129,12 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
         </SectionHeading>
       )
     case 'references-entry':
-      return <ReferenceEntryBlock entry={unit.entry} />
+      return <ReferenceEntryBlock entry={unit.entry} compact={compact} />
     case 'references-on-request':
       return (
         <p
-          className="font-normal leading-[1.45] text-zinc-700"
-          style={{ fontSize: 'var(--fs-body)' }}
+          className="font-normal text-zinc-700"
+          style={{ fontSize: 'var(--fs-body)', lineHeight: 'var(--lh-body)' }}
         >
           {REFERENCES_ON_REQUEST_TEXT}
         </p>
@@ -901,9 +1155,9 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
         </SectionHeading>
       )
     case 'experience-header':
-      return <ExperienceHeaderBlock entry={unit.entry} />
+      return <ExperienceHeaderBlock entry={unit.entry} compact={compact} />
     case 'experience-bullet':
-      return <ExperienceBullet bullet={unit.bullet} />
+      return <ExperienceBullet bullet={unit.bullet} spacing={spacing} />
     case 'experience-empty':
       return (
         <p
@@ -920,7 +1174,7 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
         </SectionHeading>
       )
     case 'education-entry':
-      return <EducationEntryBlock entry={unit.entry} />
+      return <EducationEntryBlock entry={unit.entry} compact={compact} />
     case 'education-empty':
       return (
         <p
@@ -933,9 +1187,44 @@ function renderUnit(unit: FlowUnit, resume: ResumeData): ReactNode {
   }
 }
 
-function unitGap(unit: FlowUnit, prev: FlowUnit | undefined): number {
-  if (!prev) return 0
-  return gapBefore(unit, [prev])
+type FitResult = { t: number; fits: boolean }
+
+function measureHeights(root: HTMLElement): Record<string, number> {
+  const next: Record<string, number> = {}
+  for (const el of root.querySelectorAll<HTMLElement>('[data-measure-id]')) {
+    const id = el.dataset.measureId
+    if (!id) continue
+    // Use offsetHeight (layout px), not getBoundingClientRect — the preview
+    // is CSS-scaled, and bounding rects shrink with that transform, which
+    // underestimates heights and lets content pack past the page margins.
+    const cs = window.getComputedStyle(el)
+    const mt = parseFloat(cs.marginTop) || 0
+    const mb = parseFloat(cs.marginBottom) || 0
+    next[id] = el.offsetHeight + mt + mb
+  }
+  return next
+}
+
+function applyCssVars(el: HTMLElement, vars: Record<string, string>) {
+  for (const [key, value] of Object.entries(vars)) {
+    if (key.startsWith('--')) el.style.setProperty(key, value)
+    else if (key === 'fontFamily') el.style.fontFamily = value
+  }
+}
+
+function FitStatus({ fit, pageCount }: { fit: FitResult; pageCount: number }) {
+  if (!fit.fits) {
+    return (
+      <p className="mb-3 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
+        Still {pageCount} pages at the smallest size — trim some content
+      </p>
+    )
+  }
+  return (
+    <p className="mb-3 rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800">
+      {fit.t === 0 ? 'Fits on one page' : 'Shrunk to fit on one page'}
+    </p>
+  )
 }
 
 export function ResumeDocument({
@@ -945,15 +1234,30 @@ export function ResumeDocument({
 }: ResumeDocumentProps) {
   const measureRef = useRef<HTMLDivElement>(null)
   const [heights, setHeights] = useState<Record<string, number>>({})
+  const [fitResult, setFitResult] = useState<FitResult | null>(null)
 
   const style = normalizeResumeStyle(rawStyle)
+  const compact = style.density === 'compact'
+  const baseBodyPx = scaledTypography(style.fontSize).body
+  const activeFit = useMemo(
+    () =>
+      style.fitToPage && fitResult
+        ? fitParams(fitResult.t, baseBodyPx)
+        : NO_FIT,
+    [style.fitToPage, fitResult, baseBodyPx],
+  )
   const styleVars = useMemo(
-    () => typographyCssVars(style) as CSSProperties,
-    [style],
+    () => typographyCssVars(style, activeFit) as CSSProperties,
+    [style, activeFit],
+  )
+  const spacing = useMemo(
+    () => getSpacing(style.density, activeFit.spacingScale),
+    [style.density, activeFit.spacingScale],
   )
   const margins = style.margins
   const contentHeight = pageContentHeight(margins.top, margins.bottom)
   const contentWidth = pageContentWidth(margins.left, margins.right)
+  const ctx: RenderCtx = { resume, compact, spacing }
 
   const units = useMemo(() => buildFlowUnits(resume), [resume])
   const measureKey = useMemo(
@@ -964,28 +1268,49 @@ export function ResumeDocument({
   useLayoutEffect(() => {
     const root = measureRef.current
     if (!root) return
-    const next: Record<string, number> = {}
-    for (const el of root.querySelectorAll<HTMLElement>('[data-measure-id]')) {
-      const id = el.dataset.measureId
-      if (!id) continue
-      // Use offsetHeight (layout px), not getBoundingClientRect — the preview
-      // is CSS-scaled, and bounding rects shrink with that transform, which
-      // underestimates heights and lets content pack past the page margins.
-      const cs = window.getComputedStyle(el)
-      const mt = parseFloat(cs.marginTop) || 0
-      const mb = parseFloat(cs.marginBottom) || 0
-      next[id] = el.offsetHeight + mt + mb
+    if (!style.fitToPage) {
+      setHeights(measureHeights(root))
+      setFitResult(null)
+      return
     }
-    setHeights(next)
+
+    // Measure at each candidate fit level by swapping CSS vars on the hidden
+    // measure root, so the search runs in one pass without React re-renders.
+    const measured = new Map<number, Record<string, number>>()
+    const measureAt = (t: number) => {
+      const fit = fitParams(t, baseBodyPx)
+      applyCssVars(root, typographyCssVars(style, fit))
+      const h = measureHeights(root)
+      measured.set(t, h)
+      return { h, fit }
+    }
+    const result = searchFit((t) => {
+      const { h, fit } = measureAt(t)
+      const sp = getSpacing(style.density, fit.spacingScale)
+      return packUnits(units, h, contentHeight, sp, compact).length <= 1
+    })
+    const final = measured.get(result.t) ?? measureAt(result.t).h
+    // Leave the measure root at the chosen level so it matches the next render
+    applyCssVars(root, typographyCssVars(style, fitParams(result.t, baseBodyPx)))
+    setHeights(final)
+    setFitResult(result)
+    // measureKey serializes resume + style; every other input derives from them
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [measureKey])
 
   const pages = useMemo(
-    () => packUnits(units, heights, contentHeight),
-    [units, heights, contentHeight],
+    () => packUnits(units, heights, contentHeight, spacing, compact),
+    [units, heights, contentHeight, spacing, compact],
   )
+
+  const groupGapFor = (unit: FlowUnit, prev: FlowUnit | undefined) =>
+    prev ? gapBefore(unit, [prev], spacing, compact) : 0
 
   return (
     <div id="resume-document" className="flex flex-col items-center">
+      {style.fitToPage && fitResult ? (
+        <FitStatus fit={fitResult} pageCount={pages.length} />
+      ) : null}
       <div
         aria-hidden
         ref={measureRef}
@@ -997,7 +1322,7 @@ export function ResumeDocument({
       >
         {units.map((unit) => (
           <div key={unit.key} data-measure-id={unit.key}>
-            {renderUnit(unit, resume)}
+            {renderUnit(unit, ctx)}
           </div>
         ))}
       </div>
@@ -1016,9 +1341,10 @@ export function ResumeDocument({
                 {groups.map((group, groupIndex) => {
                   const sectionId = group[0].sectionId
                   const prevGroup = groups[groupIndex - 1]
-                  const groupGap = prevGroup
-                    ? gapBefore(group[0], [prevGroup[prevGroup.length - 1]])
-                    : 0
+                  const groupGap = groupGapFor(
+                    group[0],
+                    prevGroup?.[prevGroup.length - 1],
+                  )
                   const isContinued =
                     group[0].key.includes('-cont-') ||
                     ('continued' in group[0] && group[0].continued)
@@ -1028,9 +1354,9 @@ export function ResumeDocument({
                       {group.map((unit, i) => (
                         <div
                           key={unit.key}
-                          style={{ marginTop: unitGap(unit, group[i - 1]) }}
+                          style={{ marginTop: groupGapFor(unit, group[i - 1]) }}
                         >
-                          {renderUnit(unit, resume)}
+                          {renderUnit(unit, ctx)}
                         </div>
                       ))}
                     </div>

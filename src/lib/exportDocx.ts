@@ -37,8 +37,11 @@ import {
   DEFAULT_RESUME_STYLE,
   getFontDocx,
   scaledDocxTypography,
+  scaledTypography,
   type DocxTypographyScale,
 } from './typography'
+import { fitParams, getSpacing, type DensitySpacing } from './density'
+import { findPdfFitT } from './exportPdf'
 
 function slugify(name: string): string {
   return (
@@ -57,6 +60,28 @@ type DocxCtx = {
   contentWidthTwip: number
   /** PNG bytes for each contact icon on the contact line */
   icons: Partial<Record<ContactItemKey, Uint8Array>>
+  compact: boolean
+  /** Multipliers on the normal-mode paragraph spacing */
+  gap: { section: number; entry: number; item: number; tight: number }
+}
+
+const NORMAL_SPACING = getSpacing('normal')
+
+function spacingRatio(value: number, normal: number): number {
+  return normal === 0 ? 0 : value / normal
+}
+
+function gapScale(spacing: DensitySpacing): DocxCtx['gap'] {
+  return {
+    section: spacingRatio(spacing.sectionGap, NORMAL_SPACING.sectionGap),
+    entry: spacingRatio(spacing.entryGap, NORMAL_SPACING.entryGap),
+    item: spacingRatio(spacing.itemGap, NORMAL_SPACING.itemGap),
+    tight: spacingRatio(spacing.bulletGap, NORMAL_SPACING.bulletGap),
+  }
+}
+
+function tw(twips: number, scale: number): number {
+  return Math.round(twips * scale)
 }
 
 /** Matches the preview's 11px contact icons. */
@@ -82,15 +107,56 @@ function rightTab(ctx: DocxCtx) {
   return [{ type: TabStopType.RIGHT, position: ctx.contentWidthTwip }]
 }
 
+/** Muted text pushed to the right tab stop; nothing when empty. */
+function rightRuns(text: string, ctx: DocxCtx): TextRun[] {
+  return text
+    ? [
+        new TextRun({
+          text: `\t${text}`,
+          size: ctx.sizes.dates,
+          font: ctx.font,
+          color: '666666',
+        }),
+      ]
+    : []
+}
+
+/**
+ * Compact one-line row: bold lead, optional " · rest", right-aligned date.
+ */
+function leadRow(
+  lead: string,
+  rest: string,
+  right: string,
+  leadSize: number,
+  ctx: DocxCtx,
+  spacing: { before?: number; after?: number },
+): Paragraph {
+  return new Paragraph({
+    spacing,
+    tabStops: rightTab(ctx),
+    children: [
+      new TextRun({ text: lead, bold: true, size: leadSize, font: ctx.font }),
+      ...(rest
+        ? [new TextRun({ text: ` · ${rest}`, size: ctx.sizes.body, font: ctx.font })]
+        : []),
+      ...rightRuns(right, ctx),
+    ],
+  })
+}
+
 function heading(text: string, ctx: DocxCtx): Paragraph {
   return new Paragraph({
-    spacing: { before: 240, after: 80 },
+    spacing: {
+      before: tw(240, ctx.gap.section),
+      after: ctx.compact ? 40 : 80,
+    },
     border: {
       bottom: {
         style: BorderStyle.SINGLE,
         size: 12,
         color: '333333',
-        space: 4,
+        space: ctx.compact ? 2 : 4,
       },
     },
     children: [
@@ -110,7 +176,7 @@ function body(
   opts?: { bold?: boolean; size?: number; italics?: boolean },
 ): Paragraph {
   return new Paragraph({
-    spacing: { after: 60 },
+    spacing: { after: tw(60, ctx.gap.tight) },
     children: [
       new TextRun({
         text,
@@ -125,9 +191,9 @@ function body(
 
 function bullet(text: string, ctx: DocxCtx): Paragraph {
   return new Paragraph({
-    spacing: { after: 40 },
+    spacing: { after: tw(40, ctx.gap.tight) },
     // Hanging indent so wrapped lines align with the text, not the bullet
-    indent: { left: 540, hanging: 180 },
+    indent: ctx.compact ? { left: 400, hanging: 160 } : { left: 540, hanging: 180 },
     children: [
       new TextRun({
         text: `• ${text}`,
@@ -189,7 +255,7 @@ function buildContactWithPhoto(
 
   const textChildren: Paragraph[] = [
     new Paragraph({
-      spacing: { after: line.length > 0 ? 80 : 0 },
+      spacing: { after: line.length > 0 ? (ctx.compact ? 40 : 80) : 0 },
       children: [
         new TextRun({
           text: (resume.contact.fullName || 'Your Name').toUpperCase(),
@@ -242,7 +308,7 @@ function buildContactWithPhoto(
     }),
     // Carries the header rule under both columns
     new Paragraph({
-      spacing: { after: 120 },
+      spacing: { after: ctx.compact ? 60 : 120 },
       border: {
         bottom: {
           style: BorderStyle.SINGLE,
@@ -261,13 +327,13 @@ function buildContact(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
   const paras: Paragraph[] = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 80 },
+      spacing: { after: ctx.compact ? 40 : 80 },
       border: {
         bottom: {
           style: BorderStyle.SINGLE,
           size: 12,
           color: '333333',
-          space: 8,
+          space: ctx.compact ? 4 : 8,
         },
       },
       children: [
@@ -286,7 +352,7 @@ function buildContact(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
     paras.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        spacing: { after: 120 },
+        spacing: { after: ctx.compact ? 60 : 120 },
         children: line,
       }),
     )
@@ -308,7 +374,7 @@ function buildExperience(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
     const dates = formatDateRange(entry.startDate, entry.endDate, entry.current)
     paras.push(
       new Paragraph({
-        spacing: { before: 120, after: 0 },
+        spacing: { before: tw(120, ctx.gap.entry), after: 0 },
         tabStops: rightTab(ctx),
         children: [
           new TextRun({
@@ -330,10 +396,27 @@ function buildExperience(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
         ],
       }),
     )
-    if (entry.company) {
+    if (ctx.compact && (entry.company || entry.location)) {
+      paras.push(
+        new Paragraph({
+          spacing: { after: 20 },
+          tabStops: rightTab(ctx),
+          children: [
+            new TextRun({
+              text: entry.company,
+              italics: true,
+              size: ctx.sizes.body,
+              font: ctx.font,
+            }),
+            ...rightRuns(entry.location, ctx),
+          ],
+        }),
+      )
+    }
+    if (entry.company && !ctx.compact) {
       paras.push(body(entry.company, ctx))
     }
-    if (entry.location) {
+    if (entry.location && !ctx.compact) {
       paras.push(body(entry.location, ctx, { size: ctx.sizes.dates }))
     }
     for (const b of entry.bullets.map((x) => x.trim()).filter(Boolean)) {
@@ -350,9 +433,22 @@ function buildEducation(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
 
   for (const entry of sortEducation(resume.education)) {
     const years = formatYearRange(entry.startDate, entry.endDate)
+    if (ctx.compact) {
+      const place = [entry.school, entry.location].filter(Boolean).join(', ')
+      paras.push(
+        leadRow(entry.degree || 'Degree', place, years, ctx.sizes.roleTitle, ctx, {
+          before: tw(120, ctx.gap.entry),
+          after: 0,
+        }),
+      )
+      if (entry.details.trim()) {
+        paras.push(body(entry.details, ctx, { size: ctx.sizes.details }))
+      }
+      continue
+    }
     paras.push(
       new Paragraph({
-        spacing: { before: 120, after: 20 },
+        spacing: { before: tw(120, ctx.gap.entry), after: 20 },
         children: [
           new TextRun({
             text: entry.degree || 'Degree',
@@ -378,7 +474,22 @@ function buildSkills(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
   if (skills.length === 0) return []
   return [
     heading(SECTION_LABELS.skills, ctx),
-    ...skills.map((line) => body(line, ctx)),
+    ...skills.map((line) => {
+      const labelled = ctx.compact ? /^([^:]{1,40}):\s*(.+)$/.exec(line) : null
+      if (!labelled) return body(line, ctx)
+      return new Paragraph({
+        spacing: { after: tw(60, ctx.gap.tight) },
+        children: [
+          new TextRun({
+            text: `${labelled[1]}: `,
+            bold: true,
+            size: ctx.sizes.body,
+            font: ctx.font,
+          }),
+          new TextRun({ text: labelled[2], size: ctx.sizes.body, font: ctx.font }),
+        ],
+      })
+    }),
   ]
 }
 
@@ -388,9 +499,22 @@ function buildCertifications(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
 
   for (const entry of sortCertifications(resume.certifications)) {
     const date = formatMonthYear(entry.date)
+    if (ctx.compact) {
+      paras.push(
+        leadRow(
+          entry.name || 'Certification',
+          entry.issuer.trim(),
+          date,
+          ctx.sizes.body,
+          ctx,
+          { before: tw(60, ctx.gap.item), after: 0 },
+        ),
+      )
+      continue
+    }
     paras.push(
       new Paragraph({
-        spacing: { before: 60, after: 0 },
+        spacing: { before: tw(60, ctx.gap.item), after: 0 },
         tabStops: rightTab(ctx),
         children: [
           new TextRun({
@@ -429,9 +553,10 @@ function buildReferences(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
   const paras: Paragraph[] = [heading(SECTION_LABELS.references, ctx)]
 
   for (const entry of resume.references) {
+    const role = referenceRole(entry)
     paras.push(
       new Paragraph({
-        spacing: { before: 120, after: 20 },
+        spacing: { before: tw(120, ctx.gap.entry), after: ctx.compact ? 0 : 20 },
         keepNext: true,
         children: [
           new TextRun({
@@ -440,11 +565,13 @@ function buildReferences(resume: ResumeData, ctx: DocxCtx): Paragraph[] {
             size: ctx.sizes.roleTitle,
             font: ctx.font,
           }),
+          ...(ctx.compact && role
+            ? [new TextRun({ text: ` · ${role}`, size: ctx.sizes.body, font: ctx.font })]
+            : []),
         ],
       }),
     )
-    const role = referenceRole(entry)
-    if (role) paras.push(body(role, ctx))
+    if (role && !ctx.compact) paras.push(body(role, ctx))
     if (entry.relationship.trim()) {
       paras.push(body(entry.relationship, ctx, { size: ctx.sizes.details }))
     }
@@ -494,15 +621,26 @@ export async function exportDocx(
   fileName: string,
   style: ResumeStyle = DEFAULT_RESUME_STYLE,
 ): Promise<void> {
-  const keys = [...new Set(contactLinks(resume.contact).map((item) => item.key))]
+  const compact = style.density === 'compact'
+  // Compact mode drops the contact icons, matching the preview
+  const keys = compact
+    ? []
+    : [...new Set(contactLinks(resume.contact).map((item) => item.key))]
   const pngs = await Promise.all(keys.map((key) => contactIconPng(key)))
+  // Word lays out text itself, so borrow the PDF's fit level as a best guess
+  const fitT = style.fitToPage ? findPdfFitT(resume, style) : 0
+  const fit = fitParams(fitT, scaledTypography(style.fontSize).body)
+  const spacing = getSpacing(style.density, fit.spacingScale)
+  const sizes = scaledDocxTypography(style.fontSize, fit.fontScale)
   const ctx: DocxCtx = {
     font: getFontDocx(style.fontFamily),
-    sizes: scaledDocxTypography(style.fontSize),
+    sizes: { ...sizes, name: Math.round(sizes.name * spacing.nameScale) },
     contentWidthTwip: pxToTwip(
       pageContentWidth(style.margins.left, style.margins.right),
     ),
     icons: Object.fromEntries(keys.map((key, i) => [key, pngs[i]])),
+    compact,
+    gap: gapScale(spacing),
   }
   const photo = resume.contact.photo
   const children: (Paragraph | Table)[] = photo

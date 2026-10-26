@@ -1,4 +1,5 @@
 import type { FontSizeId, ResumeFontId, ResumeStyle } from '../types/resume'
+import { getSpacing, NO_FIT, type FitParams } from './density'
 
 export const FONT_OPTIONS: { id: ResumeFontId; label: string; css: string; docx: string }[] =
   [
@@ -50,6 +51,8 @@ export const DEFAULT_RESUME_STYLE: ResumeStyle = {
     bottom: 40,
     left: 48,
   },
+  density: 'normal',
+  fitToPage: false,
 }
 
 /** Fill missing fields for older localStorage payloads. */
@@ -63,6 +66,8 @@ export function normalizeResumeStyle(
       ...DEFAULT_RESUME_STYLE.margins,
       ...style?.margins,
     },
+    density: style?.density ?? DEFAULT_RESUME_STYLE.density,
+    fitToPage: style?.fitToPage ?? DEFAULT_RESUME_STYLE.fitToPage,
   }
 }
 
@@ -97,8 +102,11 @@ export function getFontScale(id: FontSizeId): number {
   return FONT_SIZE_OPTIONS.find((f) => f.id === id)?.scale ?? 1
 }
 
-export function scaledTypography(fontSize: FontSizeId): TypographyScale {
-  const scale = getFontScale(fontSize)
+export function scaledTypography(
+  fontSize: FontSizeId,
+  fitFontScale = 1,
+): TypographyScale {
+  const scale = getFontScale(fontSize) * fitFontScale
   return {
     name: BASE.name * scale,
     contactMeta: BASE.contactMeta * scale,
@@ -124,8 +132,11 @@ const DOCX_BASE = {
 
 export type DocxTypographyScale = { [K in keyof typeof DOCX_BASE]: number }
 
-export function scaledDocxTypography(fontSize: FontSizeId): DocxTypographyScale {
-  const scale = getFontScale(fontSize)
+export function scaledDocxTypography(
+  fontSize: FontSizeId,
+  fitFontScale = 1,
+): DocxTypographyScale {
+  const scale = getFontScale(fontSize) * fitFontScale
   return {
     name: Math.round(DOCX_BASE.name * scale),
     contactMeta: Math.round(DOCX_BASE.contactMeta * scale),
@@ -139,11 +150,16 @@ export function scaledDocxTypography(fontSize: FontSizeId): DocxTypographyScale 
 
 export function typographyCssVars(
   style: ResumeStyle,
+  fit: FitParams = NO_FIT,
 ): Record<string, string> {
-  const t = scaledTypography(style.fontSize)
+  const t = scaledTypography(style.fontSize, fit.fontScale)
+  const spacing = getSpacing(style.density, fit.spacingScale)
   return {
     fontFamily: getFontCss(style.fontFamily),
-    ['--fs-name' as string]: `${t.name}px`,
+    ['--gap-heading-after' as string]: `${spacing.headingAfter}px`,
+    ['--lh-body' as string]: String(spacing.bodyLeading),
+    ['--lh-bullet' as string]: String(spacing.bulletLeading),
+    ['--fs-name' as string]: `${t.name * spacing.nameScale}px`,
     ['--fs-contact-meta' as string]: `${t.contactMeta}px`,
     ['--fs-section-heading' as string]: `${t.sectionHeading}px`,
     ['--fs-body' as string]: `${t.body}px`,

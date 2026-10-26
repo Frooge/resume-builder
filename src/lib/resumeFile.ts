@@ -6,6 +6,7 @@ import type {
   FontSizeId,
   ReferenceEntry,
   ResumeData,
+  ResumeDensity,
   ResumeFontId,
   ResumeStyle,
   SectionId,
@@ -50,6 +51,7 @@ const FONT_IDS = new Set<ResumeFontId>([
   'calibri',
 ])
 const SIZE_IDS = new Set<FontSizeId>(['small', 'medium', 'large'])
+const DENSITY_IDS = new Set<ResumeDensity>(['normal', 'compact'])
 const SECTION_IDS = new Set<SectionId>(DEFAULT_SECTION_ORDER)
 
 function isObj(value: unknown): value is Record<string, unknown> {
@@ -214,8 +216,20 @@ function parseStyle(raw: unknown): ResumeStyle {
   const fontSize = SIZE_IDS.has(o.fontSize as FontSizeId)
     ? (o.fontSize as FontSizeId)
     : DEFAULT_RESUME_STYLE.fontSize
+  const density = DENSITY_IDS.has(o.density as ResumeDensity)
+    ? (o.density as ResumeDensity)
+    : DEFAULT_RESUME_STYLE.density
+  const fitToPage =
+    typeof o.fitToPage === 'boolean'
+      ? o.fitToPage
+      : DEFAULT_RESUME_STYLE.fitToPage
   const rawMargins = isObj(o.margins) ? o.margins : {}
-  const style = normalizeResumeStyle({ fontFamily, fontSize })
+  const style = normalizeResumeStyle({
+    fontFamily,
+    fontSize,
+    density,
+    fitToPage,
+  })
   return {
     ...style,
     margins: {

@@ -72,6 +72,8 @@ export type ResumeFontId =
 
 export type FontSizeId = 'small' | 'medium' | 'large'
 
+export type ResumeDensity = 'normal' | 'compact'
+
 export interface PageMargins {
   top: number
   right: number
@@ -83,6 +85,9 @@ export interface ResumeStyle {
   fontFamily: ResumeFontId
   fontSize: FontSizeId
   margins: PageMargins
+  density: ResumeDensity
+  /** Shrink spacing, then font size, until the resume fits on one page. */
+  fitToPage: boolean
 }
 
 export interface ResumeData {

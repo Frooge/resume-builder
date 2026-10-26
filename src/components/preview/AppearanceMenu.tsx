@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useResumeStore } from '../../store/resumeStore'
-import type { FontSizeId, PageMargins, ResumeFontId } from '../../types/resume'
+import type {
+  FontSizeId,
+  PageMargins,
+  ResumeDensity,
+  ResumeFontId,
+} from '../../types/resume'
 import {
   DEFAULT_RESUME_STYLE,
   FONT_OPTIONS,
@@ -14,6 +19,11 @@ const MARGIN_FIELDS: { key: keyof PageMargins; label: string }[] = [
   { key: 'bottom', label: 'Bottom' },
   { key: 'left', label: 'Left' },
   { key: 'right', label: 'Right' },
+]
+
+const DENSITY_OPTIONS: { id: ResumeDensity; label: string }[] = [
+  { id: 'normal', label: 'Normal' },
+  { id: 'compact', label: 'Compact' },
 ]
 
 const MARGIN_MIN = 16
@@ -85,6 +95,37 @@ export function AppearanceMenu() {
           className="w-[220px] py-1"
           onPointerDown={(e) => e.stopPropagation()}
         >
+          <p className="px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+            Layout
+          </p>
+          {DENSITY_OPTIONS.map((d) => {
+            const active = style.density === d.id
+            return (
+              <button
+                key={d.id}
+                type="button"
+                onClick={() => setStyle({ density: d.id })}
+                className={`flex w-full items-center px-3 py-1.5 text-left text-xs hover:bg-zinc-50 ${
+                  active ? 'bg-zinc-50 font-medium text-zinc-900' : 'text-zinc-700'
+                }`}
+              >
+                {d.label}
+                {active ? (
+                  <span className="ml-auto text-[10px] text-zinc-400">✓</span>
+                ) : null}
+              </button>
+            )
+          })}
+          <label className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50">
+            <input
+              type="checkbox"
+              checked={style.fitToPage}
+              onChange={(e) => setStyle({ fitToPage: e.target.checked })}
+              className="h-3.5 w-3.5 accent-zinc-900"
+            />
+            Fit to one page
+          </label>
+          <div className="my-1 border-t border-zinc-100" />
           <p className="px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
             Font
           </p>
